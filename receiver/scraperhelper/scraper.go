@@ -38,6 +38,8 @@ type Scraper interface {
 
 	// ID returns the scraper id.
 	ID() config.ComponentID
+	// LogErrorsAtDebug returns true if errors should only be logged at debug level.
+	LogErrorsAtDebug() bool
 	Scrape(context.Context) (pdata.Metrics, error)
 }
 
@@ -58,17 +60,29 @@ func WithShutdown(shutdown component.ShutdownFunc) ScraperOption {
 	}
 }
 
+// WithErrorsAtDebugLevel sets the scraper to log its errors at debug level.
+func WithErrorsAtDebugLevel() ScraperOption {
+	return func(o *baseScraper) {
+		o.logErrorsAtDebug = true
+	}
+}
+
 var _ Scraper = (*baseScraper)(nil)
 
 type baseScraper struct {
 	component.StartFunc
 	component.ShutdownFunc
 	ScrapeFunc
-	id config.ComponentID
+	id               config.ComponentID
+	logErrorsAtDebug bool
 }
 
 func (b *baseScraper) ID() config.ComponentID {
 	return b.id
+}
+
+func (b *baseScraper) LogErrorsAtDebug() bool {
+	return b.logErrorsAtDebug
 }
 
 // NewScraper creates a Scraper that calls Scrape at the specified collection interval,

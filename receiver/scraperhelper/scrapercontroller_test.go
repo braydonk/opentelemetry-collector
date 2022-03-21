@@ -179,7 +179,7 @@ func TestScrapeController(t *testing.T) {
 			const iterations = 5
 
 			if test.expectScraped || test.scrapeErr != nil {
-				// validate that scrape is called at least N times for each configured scraper
+				// validate that scrape is called at least iterations times for each configured scraper
 				for i := 0; i < iterations; i++ {
 					tickerCh <- time.Now()
 
