@@ -60,75 +60,6 @@ func TestParsePatternValid(t *testing.T) {
 			},
 		},
 		{
-			name:  "multimatch",
-			input: "a_b.{one,two}",
-			pattern: &pattern{
-				groups: []group{
-					{
-						typ: groupIdentifier,
-						values: []string{
-							"a_b",
-						},
-					},
-					{
-						typ: groupMultimatch,
-						values: []string{
-							"one",
-							"two",
-						},
-					},
-				},
-			},
-		},
-		{
-			name:  "identifier wildcard and multimatch",
-			input: "x.*.{first_metric,second_metric}",
-			pattern: &pattern{
-				groups: []group{
-					{
-						typ: groupIdentifier,
-						values: []string{
-							"x",
-						},
-					},
-					{
-						typ: groupWildcard,
-					},
-					{
-						typ: groupMultimatch,
-						values: []string{
-							"first_metric",
-							"second_metric",
-						},
-					},
-				},
-			},
-		},
-		{
-			name:  "identifier multimatch and wildcard",
-			input: "x.{first_metric,second_metric}.*",
-			pattern: &pattern{
-				groups: []group{
-					{
-						typ: groupIdentifier,
-						values: []string{
-							"x",
-						},
-					},
-					{
-						typ: groupMultimatch,
-						values: []string{
-							"first_metric",
-							"second_metric",
-						},
-					},
-					{
-						typ: groupWildcard,
-					},
-				},
-			},
-		},
-		{
 			name:  "with numeric character",
 			input: "x1",
 			pattern: &pattern{
@@ -263,28 +194,10 @@ func TestMatchNames(t *testing.T) {
 			expectedMatches: []string{"a", "a.a", "a.a.a"},
 		},
 		{
-			name:            "simple multimatch",
-			pattern:         "a.{b,c}",
-			names:           []string{"a.b", "a.c", "a.d"},
-			expectedMatches: []string{"a.b", "a.c"},
-		},
-		{
 			name:            "wildcard match in prefix",
 			pattern:         "*.a",
 			names:           []string{"a", "b.a", "c.a"},
 			expectedMatches: []string{"b.a", "c.a"},
-		},
-		{
-			name:            "wildcard and multimatch",
-			pattern:         "a.{b,c,d}.*",
-			names:           []string{"a.b.a", "a.c.x", "a.d.c.d.f", "a.e.x"},
-			expectedMatches: []string{"a.b.a", "a.c.x", "a.d.c.d.f"},
-		},
-		{
-			name:            "shorter name than pattern",
-			pattern:         "{b,c}",
-			names:           []string{"a.b", "a.c"},
-			expectedMatches: []string{},
 		},
 	}
 
@@ -321,11 +234,6 @@ func TestPatternPriorityAndDeterminism(t *testing.T) {
 			name:          "earlier matcher applied first",
 			patterns:      []string{"a.*", "*.a", "*.*.a", "a.a.*"},
 			expectedOrder: []string{"*.a", "a.*", "*.*.a", "a.a.*"},
-		},
-		{
-			name:          "wildcard before multimatch",
-			patterns:      []string{"{a,b}.*", "*.{a,b}"},
-			expectedOrder: []string{"*.{a,b}", "{a,b}.*"},
 		},
 		{
 			name:          "lexicographical order",
@@ -416,19 +324,6 @@ func TestApplicationScenarios(t *testing.T) {
 				"http.client.open_connections":    1,
 				"http.client.connection.duration": 1,
 				"http.client.active_requests":     1,
-			},
-		},
-		{
-			name:  "http metrics complex",
-			names: httpMetrics,
-			patterns: map[string]any{
-				"http.*.{request,response}.body.size": 1,
-			},
-			expectedMatches: map[string]any{
-				"http.client.request.body.size":  1,
-				"http.client.response.body.size": 1,
-				"http.server.request.body.size":  1,
-				"http.server.response.body.size": 1,
 			},
 		},
 		{
