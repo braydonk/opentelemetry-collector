@@ -23,6 +23,8 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
@@ -179,6 +181,32 @@ func TestLogs_WithRecordMetrics(t *testing.T) {
 	require.NotNil(t, le)
 
 	checkRecordedMetricsForLogs(t, tt, fakeLogsName, le, nil)
+}
+
+func TestLogs_WithRecordMetrics_PartialError(t *testing.T) {
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	partialErr := xconsumererror.NewPartial(errors.New("partial error"), 1)
+
+	le, err := NewLogs(context.Background(), exporter.Settings{ID: fakeLogsName, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()}, &fakeLogsConfig, newPushLogsData(partialErr))
+	require.NoError(t, err)
+	require.NotNil(t, le)
+
+	checkRecordedMetricsForLogs(t, tt, fakeLogsName, le, partialErr)
+}
+
+func TestLogs_WithRecordMetrics_SignalError(t *testing.T) {
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	signalErr := consumererror.NewLogs(errors.New("signal error"), testdata.GenerateLogs(1))
+
+	le, err := NewLogs(context.Background(), exporter.Settings{ID: fakeLogsName, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()}, &fakeLogsConfig, newPushLogsData(signalErr))
+	require.NoError(t, err)
+	require.NotNil(t, le)
+
+	checkRecordedMetricsForLogs(t, tt, fakeLogsName, le, signalErr)
 }
 
 func TestLogs_pLogModifiedDownStream_WithRecordMetrics(t *testing.T) {
@@ -338,26 +366,35 @@ func checkRecordedMetricsForLogs(t *testing.T, tt *componenttest.Telemetry, id c
 		require.Equal(t, wantError, le.ConsumeLogs(context.Background(), ld))
 	}
 
-	// TODO: When the new metrics correctly count partial dropped fix this.
-	if wantError != nil {
-		metadatatest.AssertEqualExporterSendFailedLogRecords(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String("exporter", id.String())),
-					Value: int64(numBatches * ld.LogRecordCount()),
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+	allRecords := ld.LogRecordCount() * numBatches
+	var expectedRecords int
+	if wantError == nil {
+		expectedRecords = allRecords
+	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
+		successPerBatch := ld.LogRecordCount() - partialError.Failed()
+		expectedRecords = numBatches * successPerBatch
+	} else if logsError, ok := asSignalError(wantError); ok {
+		successPerbatch := ld.LogRecordCount() - logsError.Data().LogRecordCount()
+		expectedRecords = numBatches * successPerbatch
 	} else {
-		metadatatest.AssertEqualExporterSentLogRecords(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String("exporter", id.String())),
-					Value: int64(numBatches * ld.LogRecordCount()),
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+		expectedRecords = 0
 	}
+	metadatatest.AssertEqualExporterSentLogRecords(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String("exporter", id.String())),
+				Value: int64(expectedRecords),
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+}
+
+func asSignalError(err error) (consumererror.Logs, bool) {
+	var logsErr consumererror.Logs
+	if errors.As(err, &logsErr) {
+		return logsErr, true
+	}
+	return consumererror.Logs{}, false
 }
 
 func generateLogsTraffic(t *testing.T, tracer trace.Tracer, le exporter.Logs, numRequests int, wantError error) {

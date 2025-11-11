@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
@@ -179,6 +180,19 @@ func TestMetrics_WithRecordMetrics(t *testing.T) {
 	require.NotNil(t, me)
 
 	checkRecordedMetricsForMetrics(t, tt, fakeMetricsName, me, nil)
+}
+
+func TestMetrics_WithRecordMetrics_PartialError(t *testing.T) {
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	partialErr := xconsumererror.NewPartial(errors.New("partial error"), 1)
+
+	me, err := NewMetrics(context.Background(), exporter.Settings{ID: fakeMetricsName, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()}, &fakeMetricsConfig, newPushMetricsData(partialErr))
+	require.NoError(t, err)
+	require.NotNil(t, me)
+
+	checkRecordedMetricsForMetrics(t, tt, fakeMetricsName, me, partialErr)
 }
 
 func TestMetrics_pMetricModifiedDownStream_WithRecordMetrics(t *testing.T) {
@@ -341,27 +355,38 @@ func checkRecordedMetricsForMetrics(t *testing.T, tt *componenttest.Telemetry, i
 		require.Equal(t, wantError, me.ConsumeMetrics(context.Background(), md))
 	}
 
-	// TODO: When the new metrics correctly count partial dropped fix this.
-	numPoints := int64(numBatches * md.MetricCount() * 2) /* 2 points per metric*/
-	if wantError != nil {
-		metadatatest.AssertEqualExporterSendFailedMetricPoints(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String(internal.ExporterKey, id.String())),
-					Value: numPoints,
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+	allPoints := numBatches * md.MetricCount() * 2
+	var successPoints, failedPoints int
+	if wantError == nil {
+		successPoints = allPoints
+		failedPoints = 0
+	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
+		// In this scenario the partial error failed count is failed datapoints,
+		// not failed entire metrics.
+		failedPerBatch := partialError.Failed()
+		failedPoints = numBatches * failedPerBatch
+		successPoints = allPoints - failedPoints
 	} else {
-		metadatatest.AssertEqualExporterSentMetricPoints(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String(internal.ExporterKey, id.String())),
-					Value: numPoints,
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+		successPoints = 0
+		failedPoints = allPoints
 	}
+
+	metadatatest.AssertEqualExporterSendFailedMetricPoints(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String(internal.ExporterKey, id.String())),
+				Value: int64(failedPoints),
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+	metadatatest.AssertEqualExporterSentMetricPoints(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String(internal.ExporterKey, id.String())),
+				Value: int64(successPoints),
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
 }
 
 func generateMetricsTraffic(t *testing.T, tracer trace.Tracer, me exporter.Metrics, numRequests int, wantError error) {

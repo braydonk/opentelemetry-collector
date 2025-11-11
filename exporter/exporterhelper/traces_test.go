@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
@@ -181,6 +182,19 @@ func TestTraces_WithRecordMetrics(t *testing.T) {
 	require.NotNil(t, te)
 
 	checkRecordedMetricsForTraces(t, tt, fakeTracesName, te, nil)
+}
+
+func TestTraces_WithRecordMetrics_PartialError(t *testing.T) {
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	partialErr := xconsumererror.NewPartial(errors.New("partial error"), 1)
+
+	te, err := NewTraces(context.Background(), exporter.Settings{ID: fakeTracesName, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()}, &fakeTracesConfig, newTraceDataPusher(partialErr))
+	require.NoError(t, err)
+	require.NotNil(t, te)
+
+	checkRecordedMetricsForTraces(t, tt, fakeTracesName, te, partialErr)
 }
 
 func TestTraces_pLogModifiedDownStream_WithRecordMetrics(t *testing.T) {
@@ -347,26 +361,34 @@ func checkRecordedMetricsForTraces(t *testing.T, tt *componenttest.Telemetry, id
 		require.Equal(t, wantError, te.ConsumeTraces(context.Background(), td))
 	}
 
-	// TODO: When the new metrics correctly count partial dropped fix this.
-	if wantError != nil {
-		metadatatest.AssertEqualExporterSendFailedSpans(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String(internal.ExporterKey, id.String())),
-					Value: int64(numBatches * td.SpanCount()),
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+	allSpans := numBatches * td.SpanCount()
+	var successSpans, failedSpans int
+	if wantError == nil {
+		successSpans = allSpans
+	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
+		failedPerBatch := partialError.Failed()
+		failedSpans = numBatches * failedPerBatch
+		successSpans = allSpans - failedSpans
 	} else {
-		metadatatest.AssertEqualExporterSentSpans(t, tt,
-			[]metricdata.DataPoint[int64]{
-				{
-					Attributes: attribute.NewSet(
-						attribute.String(internal.ExporterKey, id.String())),
-					Value: int64(numBatches * td.SpanCount()),
-				},
-			}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+		failedSpans = allSpans
 	}
+
+	metadatatest.AssertEqualExporterSendFailedSpans(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String(internal.ExporterKey, id.String())),
+				Value: int64(failedSpans),
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+	metadatatest.AssertEqualExporterSentSpans(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String(internal.ExporterKey, id.String())),
+				Value: int64(successSpans),
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
 }
 
 func generateTraceTraffic(t *testing.T, tracer trace.Tracer, te exporter.Traces, numRequests int, wantError error) {

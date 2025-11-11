@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadatatest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/request"
@@ -46,9 +47,13 @@ func TestExportTraceDataOp(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	partialFailCount := 10
+	errPartial := xconsumererror.NewPartial(errors.New("errPartial"), partialFailCount)
+
 	params := []testParams{
 		{items: 22, err: nil},
 		{items: 14, err: errFake},
+		{items: 14, err: errPartial},
 	}
 	for i := range params {
 		exporterErr = params[i].err
@@ -71,6 +76,14 @@ func TestExportTraceDataOp(t *testing.T) {
 			failedToSendSpans += params[i].items
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(0)})
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(params[i].items))})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+		case errors.Is(params[i].err, errPartial):
+			partialSuccessCount := params[i].items - partialFailCount
+			sentSpans += partialSuccessCount
+			failedToSendSpans += partialFailCount
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(int64(partialSuccessCount))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(partialFailCount))})
 			assert.Equal(t, codes.Error, span.Status().Code)
 			assert.Equal(t, params[i].err.Error(), span.Status().Description)
 		default:
@@ -114,9 +127,13 @@ func TestExportMetricsOp(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	partialFailCount := 10
+	errPartial := xconsumererror.NewPartial(errors.New("errPartial"), partialFailCount)
+
 	params := []testParams{
 		{items: 17, err: nil},
 		{items: 23, err: errFake},
+		{items: 20, err: errPartial},
 	}
 	for i := range params {
 		exporterErr = params[i].err
@@ -139,6 +156,14 @@ func TestExportMetricsOp(t *testing.T) {
 			failedToSendMetricPoints += params[i].items
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(0)})
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(params[i].items))})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+		case errors.Is(params[i].err, errPartial):
+			partialSuccessCount := params[i].items - partialFailCount
+			sentMetricPoints += partialSuccessCount
+			failedToSendMetricPoints += partialFailCount
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(int64(partialSuccessCount))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(partialFailCount))})
 			assert.Equal(t, codes.Error, span.Status().Code)
 			assert.Equal(t, params[i].err.Error(), span.Status().Description)
 		default:
@@ -182,9 +207,13 @@ func TestExportLogsOp(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	partialFailCount := 10
+	errPartial := xconsumererror.NewPartial(errors.New("errPartial"), partialFailCount)
+
 	params := []testParams{
 		{items: 17, err: nil},
 		{items: 23, err: errFake},
+		{items: 21, err: errPartial},
 	}
 	for i := range params {
 		exporterErr = params[i].err
@@ -207,6 +236,14 @@ func TestExportLogsOp(t *testing.T) {
 			failedToSendLogRecords += params[i].items
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(0)})
 			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(params[i].items))})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+		case errors.Is(params[i].err, errPartial):
+			partialSuccessCount := params[i].items - partialFailCount
+			sentLogRecords += partialSuccessCount
+			failedToSendLogRecords += partialFailCount
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(int64(partialSuccessCount))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(int64(partialFailCount))})
 			assert.Equal(t, codes.Error, span.Status().Code)
 			assert.Equal(t, params[i].err.Error(), span.Status().Description)
 		default:

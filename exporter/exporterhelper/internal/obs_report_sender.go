@@ -5,6 +5,7 @@ package internal // import "go.opentelemetry.io/collector/exporter/exporterhelpe
 
 import (
 	"context"
+	"errors"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -12,6 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadata"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/queuebatch"
@@ -105,8 +108,8 @@ func (ors *obsReportSender[K]) startOp(ctx context.Context) context.Context {
 }
 
 // EndOp completes the export operation that was started with StartOp.
-func (ors *obsReportSender[K]) endOp(ctx context.Context, numLogRecords int, err error) {
-	numSent, numFailedToSend := toNumItems(numLogRecords, err)
+func (ors *obsReportSender[K]) endOp(ctx context.Context, numItems int, err error) {
+	numSent, numFailedToSend := toNumItems(int64(numItems), err)
 
 	// No metrics recorded for profiles.
 	if ors.itemsSentInst != nil {
@@ -131,9 +134,32 @@ func (ors *obsReportSender[K]) endOp(ctx context.Context, numLogRecords int, err
 	}
 }
 
-func toNumItems(numExportedItems int, err error) (int64, int64) {
-	if err != nil {
-		return 0, int64(numExportedItems)
+func toNumItems(numExportedItems int64, err error) (int64, int64) {
+	if err == nil {
+		return numExportedItems, 0
 	}
-	return int64(numExportedItems), 0
+	if partialErr, ok := xconsumererror.AsPartial(err); ok {
+		numFailedItems := int64(partialErr.Failed())
+		return numExportedItems - numFailedItems, numFailedItems
+	}
+	if numSignalFailed, ok := countSignalError(err); ok {
+		return numExportedItems - numSignalFailed, numSignalFailed
+	}
+	return 0, numExportedItems
+}
+
+func countSignalError(err error) (int64, bool) {
+	var logsErr consumererror.Logs
+	if errors.As(err, &logsErr) {
+		return int64(logsErr.Data().LogRecordCount()), true
+	}
+	var metricsErr consumererror.Metrics
+	if errors.As(err, &metricsErr) {
+		return int64(metricsErr.Data().DataPointCount()), true
+	}
+	var tracesErr consumererror.Traces
+	if errors.As(err, &tracesErr) {
+		return int64(tracesErr.Data().SpanCount()), true
+	}
+	return 0, false
 }
