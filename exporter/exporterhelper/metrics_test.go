@@ -360,10 +360,9 @@ func checkRecordedMetricsForMetrics(t *testing.T, tt *componenttest.Telemetry, i
 	if wantError == nil {
 		successPoints = allPoints
 		failedPoints = 0
-	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
+	} else if failedPerBatch, ok := xconsumererror.IsPartial(wantError); ok {
 		// In this scenario the partial error failed count is failed datapoints,
 		// not failed entire metrics.
-		failedPerBatch := partialError.Failed()
 		failedPoints = numBatches * failedPerBatch
 		successPoints = allPoints - failedPoints
 	} else {

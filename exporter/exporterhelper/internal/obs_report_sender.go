@@ -138,9 +138,9 @@ func toNumItems(numExportedItems int64, err error) (int64, int64) {
 	if err == nil {
 		return numExportedItems, 0
 	}
-	if partialErr, ok := xconsumererror.AsPartial(err); ok {
-		numFailedItems := int64(partialErr.Failed())
-		return numExportedItems - numFailedItems, numFailedItems
+	if numFailedItems, ok := xconsumererror.IsPartial(err); ok {
+		numFailedItemsI64 := int64(numFailedItems)
+		return numExportedItems - numFailedItemsI64, numFailedItemsI64
 	}
 	if numSignalFailed, ok := countSignalError(err); ok {
 		return numExportedItems - numSignalFailed, numSignalFailed

@@ -370,8 +370,8 @@ func checkRecordedMetricsForLogs(t *testing.T, tt *componenttest.Telemetry, id c
 	var expectedRecords int
 	if wantError == nil {
 		expectedRecords = allRecords
-	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
-		successPerBatch := ld.LogRecordCount() - partialError.Failed()
+	} else if failedItems, ok := xconsumererror.IsPartial(wantError); ok {
+		successPerBatch := ld.LogRecordCount() - failedItems
 		expectedRecords = numBatches * successPerBatch
 	} else if logsError, ok := asSignalError(wantError); ok {
 		successPerbatch := ld.LogRecordCount() - logsError.Data().LogRecordCount()

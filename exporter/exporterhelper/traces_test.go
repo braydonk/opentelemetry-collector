@@ -365,8 +365,7 @@ func checkRecordedMetricsForTraces(t *testing.T, tt *componenttest.Telemetry, id
 	var successSpans, failedSpans int
 	if wantError == nil {
 		successSpans = allSpans
-	} else if partialError, ok := xconsumererror.AsPartial(wantError); ok {
-		failedPerBatch := partialError.Failed()
+	} else if failedPerBatch, ok := xconsumererror.IsPartial(wantError); ok {
 		failedSpans = numBatches * failedPerBatch
 		successSpans = allSpans - failedSpans
 	} else {
