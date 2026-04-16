@@ -91,6 +91,8 @@ type persistentQueue[T request.Request] struct {
 	stopped         bool
 
 	blockOnOverflow bool
+
+	compoundLimits request.BatchLimits
 }
 
 // newPersistentQueue creates a new queue backed by file storage; name and signal must be a unique combination that identifies the queue storage
@@ -107,6 +109,7 @@ func newPersistentQueue[T request.Request](set Settings[T]) readableQueue[T] {
 		id:              set.ID,
 		signal:          set.Signal,
 		blockOnOverflow: set.BlockOnOverflow,
+		compoundLimits:  set.CompoundLimits,
 	}
 	pq.hasMoreElements = sync.NewCond(&pq.mu)
 	pq.hasMoreSpace = newCond(&pq.mu)
@@ -273,8 +276,37 @@ func (pq *persistentQueue[T]) Offer(ctx context.Context, req T) error {
 	pq.mu.Lock()
 	defer pq.mu.Unlock()
 
-	size := pq.activeSizer.Sizeof(req)
-	for pq.internalSize()+size > pq.capacity {
+	var size, elReqs, elItems, elBytes int64
+	if pq.compoundLimits != (request.BatchLimits{}) {
+		elReqs = 1
+		elItems = pq.itemsSizer.Sizeof(req)
+		elBytes = pq.bytesSizer.Sizeof(req)
+		// Check if any limit is exceeded by the element itself
+		if (pq.compoundLimits.NumRequests > 0 && elReqs > pq.compoundLimits.NumRequests) ||
+			(pq.compoundLimits.NumItems > 0 && elItems > pq.compoundLimits.NumItems) ||
+			(pq.compoundLimits.NumBytes > 0 && elBytes > pq.compoundLimits.NumBytes) {
+			return errSizeTooLarge
+		}
+	} else {
+		size = pq.activeSizer.Sizeof(req)
+	}
+
+	for {
+		overLimit := false
+		if pq.compoundLimits != (request.BatchLimits{}) {
+			if (pq.compoundLimits.NumRequests > 0 && pq.requestSize()+elReqs > pq.compoundLimits.NumRequests) ||
+				(pq.compoundLimits.NumItems > 0 && pq.metadata.ItemsSize+elItems > pq.compoundLimits.NumItems) ||
+				(pq.compoundLimits.NumBytes > 0 && pq.metadata.BytesSize+elBytes > pq.compoundLimits.NumBytes) {
+				overLimit = true
+			}
+		} else if pq.internalSize()+size > pq.capacity {
+			overLimit = true
+		}
+
+		if !overLimit {
+			break
+		}
+
 		if !pq.blockOnOverflow {
 			return ErrQueueIsFull
 		}

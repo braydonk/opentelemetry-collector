@@ -241,3 +241,37 @@ func consume[T any](q readableQueue[T], consumeFunc func(context.Context, T) err
 	done.OnDone(consumeFunc(ctx, req))
 	return true
 }
+
+func TestMemoryQueue_CompoundLimits(t *testing.T) {
+	set := newSettings(request.SizerTypeCompound, 0)
+	set.CompoundLimits = request.BatchLimits{NumRequests: 2, NumItems: 10, NumBytes: 100}
+	q := newMemoryQueue[intRequest](set)
+	require.NoError(t, q.Start(context.Background(), componenttest.NewNopHost()))
+
+	// Element 1: 1 request, 5 items, 50 bytes
+	require.NoError(t, q.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 1, q.Size())
+
+	// Element 2: 1 request, 5 items, 50 bytes
+	// Total: 2 requests, 10 items, 100 bytes. This should reach the limit but not exceed it.
+	require.NoError(t, q.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 2, q.Size())
+
+	// Element 3: 1 request, 1 item, 10 bytes
+	// Total would be 3 requests, 11 items, 110 bytes. This exceeds limits.
+	require.ErrorIs(t, q.Offer(context.Background(), intRequest(1)), ErrQueueIsFull)
+	assert.EqualValues(t, 2, q.Size())
+
+	// Consume one element
+	assert.True(t, consume(q, func(_ context.Context, el intRequest) error {
+		assert.EqualValues(t, 5, el)
+		return nil
+	}))
+	assert.EqualValues(t, 1, q.Size())
+
+	// Now we should be able to add another element
+	require.NoError(t, q.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 2, q.Size())
+
+	require.NoError(t, q.Shutdown(context.Background()))
+}

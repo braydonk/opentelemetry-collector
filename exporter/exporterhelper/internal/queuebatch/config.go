@@ -28,6 +28,9 @@ type Config struct {
 	// QueueSize represents the maximum data size allowed for concurrent storage and processing.
 	QueueSize int64 `mapstructure:"queue_size"`
 
+	// CompoundLimits is the limits for compound sizer.
+	CompoundLimits request.BatchLimits `mapstructure:"compound_limits"`
+
 	// BlockOnOverflow determines the behavior when the component's TotalSize limit is reached.
 	// If true, the component will wait for space; otherwise, operations will immediately return a retryable error.
 	BlockOnOverflow bool `mapstructure:"block_on_overflow"`
@@ -68,8 +71,26 @@ func (cfg *Config) Validate() error {
 		return errors.New("`num_consumers` must be positive")
 	}
 
-	if cfg.QueueSize <= 0 {
-		return errors.New("`queue_size` must be positive")
+	if cfg.Sizer == request.SizerTypeCompound {
+		if cfg.QueueSize != 0 {
+			return errors.New("`queue_size` must not be set when `sizer` is `compound`")
+		}
+		if cfg.CompoundLimits == (request.BatchLimits{}) {
+			return errors.New("`compound_limits` must be set when `sizer` is `compound`")
+		}
+		if cfg.CompoundLimits.NumRequests < 0 || cfg.CompoundLimits.NumItems < 0 || cfg.CompoundLimits.NumBytes < 0 {
+			return errors.New("limits in `compound_limits` must be non-negative")
+		}
+		if cfg.CompoundLimits.NumRequests == 0 && cfg.CompoundLimits.NumItems == 0 && cfg.CompoundLimits.NumBytes == 0 {
+			return errors.New("at least one limit in `compound_limits` must be positive")
+		}
+	} else {
+		if cfg.QueueSize <= 0 {
+			return errors.New("`queue_size` must be positive")
+		}
+		if cfg.CompoundLimits != (request.BatchLimits{}) {
+			return errors.New("`compound_limits` must not be set when `sizer` is not `compound`")
+		}
 	}
 
 	// Only support request sizer for persistent queue at this moment.

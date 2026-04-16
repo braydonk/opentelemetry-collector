@@ -67,6 +67,7 @@ type Queue[T any] interface {
 type Settings[T request.Request] struct {
 	SizerType        request.SizerType
 	Capacity         int64
+	CompoundLimits   request.BatchLimits
 	NumConsumers     int
 	WaitForResult    bool
 	BlockOnOverflow  bool

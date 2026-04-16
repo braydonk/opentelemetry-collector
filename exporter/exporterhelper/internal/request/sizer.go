@@ -23,12 +23,14 @@ const (
 	sizerTypeBytes    = "bytes"
 	sizerTypeItems    = "items"
 	sizerTypeRequests = "requests"
+	sizerTypeCompound = "compound"
 )
 
 var (
 	SizerTypeBytes    = SizerType{val: sizerTypeBytes}
 	SizerTypeItems    = SizerType{val: sizerTypeItems}
 	SizerTypeRequests = SizerType{val: sizerTypeRequests}
+	SizerTypeCompound = SizerType{val: sizerTypeCompound}
 )
 
 // UnmarshalText implements TextUnmarshaler interface.
@@ -40,6 +42,8 @@ func (s *SizerType) UnmarshalText(text []byte) error {
 		*s = SizerTypeBytes
 	case sizerTypeRequests:
 		*s = SizerTypeRequests
+	case sizerTypeCompound:
+		*s = SizerTypeCompound
 	default:
 		return fmt.Errorf("invalid sizer: %q", str)
 	}
@@ -95,4 +99,11 @@ func NewItemsSizer() Sizer {
 
 func NewBytesSizer() Sizer {
 	return bytesSizer{}
+}
+
+// BatchLimits defines limits for a batch in terms of requests, items, and bytes.
+type BatchLimits struct {
+	NumRequests int64 `mapstructure:"num_requests"`
+	NumItems    int64 `mapstructure:"num_items"`
+	NumBytes    int64 `mapstructure:"num_bytes"`
 }

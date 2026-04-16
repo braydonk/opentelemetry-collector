@@ -40,6 +40,11 @@ type memoryQueue[T request.Request] struct {
 	stopped         bool
 	waitForResult   bool
 	blockOnOverflow bool
+
+	compoundLimits request.BatchLimits
+	reqCount       int64
+	itemCount      int64
+	byteCount      int64
 }
 
 // newMemoryQueue creates a sized elements channel. Each element is assigned a size by the provided sizer.
@@ -49,6 +54,7 @@ func newMemoryQueue[T request.Request](set Settings[T]) readableQueue[T] {
 		refCounter:      set.ReferenceCounter,
 		sizer:           request.NewSizer(set.SizerType),
 		cap:             set.Capacity,
+		compoundLimits:  set.CompoundLimits,
 		items:           &linkedQueue[T]{},
 		waitForResult:   set.WaitForResult,
 		blockOnOverflow: set.BlockOnOverflow,
@@ -61,26 +67,39 @@ func newMemoryQueue[T request.Request](set Settings[T]) readableQueue[T] {
 // Offer puts the element into the queue with the given sized if there is enough capacity.
 // Returns an error if the queue is full.
 func (mq *memoryQueue[T]) Offer(ctx context.Context, el T) error {
-	elSize := mq.sizer.Sizeof(el)
-	// Ignore empty requests, see https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md#empty-telemetry-envelopes
-	if elSize == 0 {
-		return nil
-	}
+	var elSize, elReqs, elItems, elBytes int64
+	if mq.compoundLimits != (request.BatchLimits{}) {
+		elReqs = 1
+		elItems = int64(el.ItemsCount())
+		elBytes = int64(el.BytesSize())
+		// Check if any limit is exceeded by the element itself
+		if (mq.compoundLimits.NumRequests > 0 && elReqs > mq.compoundLimits.NumRequests) ||
+			(mq.compoundLimits.NumItems > 0 && elItems > mq.compoundLimits.NumItems) ||
+			(mq.compoundLimits.NumBytes > 0 && elBytes > mq.compoundLimits.NumBytes) {
+			return errSizeTooLarge
+		}
+	} else {
+		elSize = mq.sizer.Sizeof(el)
+		// Ignore empty requests, see https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md#empty-telemetry-envelopes
+		if elSize == 0 {
+			return nil
+		}
 
-	if elSize <= 0 {
-		return errInvalidSize
-	}
+		if elSize <= 0 {
+			return errInvalidSize
+		}
 
-	// If element larger than the capacity, will never been able to add it.
-	if elSize > mq.cap {
-		return errSizeTooLarge
+		// If element larger than the capacity, will never been able to add it.
+		if elSize > mq.cap {
+			return errSizeTooLarge
+		}
 	}
 
 	if mq.refCounter != nil {
 		mq.refCounter.Ref(el)
 	}
 
-	done, err := mq.add(ctx, el, elSize)
+	done, err := mq.add(ctx, el, elSize, elReqs, elItems, elBytes)
 	if err != nil {
 		// Unref in case of an error since there will not be any async worker to pick it up.
 		if mq.refCounter != nil {
@@ -104,11 +123,26 @@ func (mq *memoryQueue[T]) Offer(ctx context.Context, el T) error {
 	return nil
 }
 
-func (mq *memoryQueue[T]) add(ctx context.Context, el T, elSize int64) (*blockingDone, error) {
+func (mq *memoryQueue[T]) add(ctx context.Context, el T, elSize, elReqs, elItems, elBytes int64) (*blockingDone, error) {
 	mq.mu.Lock()
 	defer mq.mu.Unlock()
 
-	for mq.size+elSize > mq.cap {
+	for {
+		overLimit := false
+		if mq.compoundLimits != (request.BatchLimits{}) {
+			if (mq.compoundLimits.NumRequests > 0 && mq.reqCount+elReqs > mq.compoundLimits.NumRequests) ||
+				(mq.compoundLimits.NumItems > 0 && mq.itemCount+elItems > mq.compoundLimits.NumItems) ||
+				(mq.compoundLimits.NumBytes > 0 && mq.byteCount+elBytes > mq.compoundLimits.NumBytes) {
+				overLimit = true
+			}
+		} else if mq.size+elSize > mq.cap {
+			overLimit = true
+		}
+
+		if !overLimit {
+			break
+		}
+
 		if !mq.blockOnOverflow {
 			return nil, ErrQueueIsFull
 		}
@@ -118,9 +152,15 @@ func (mq *memoryQueue[T]) add(ctx context.Context, el T, elSize int64) (*blockin
 		}
 	}
 
-	mq.size += elSize
+	if mq.compoundLimits != (request.BatchLimits{}) {
+		mq.reqCount += elReqs
+		mq.itemCount += elItems
+		mq.byteCount += elBytes
+	} else {
+		mq.size += elSize
+	}
 	done := blockingDonePool.Get().(*blockingDone)
-	done.reset(elSize, mq)
+	done.reset(elSize, elReqs, elItems, elBytes, mq)
 
 	if !mq.waitForResult {
 		// Prevent cancellation and deadline to propagate to the context stored in the queue.
@@ -162,6 +202,9 @@ func (mq *memoryQueue[T]) onDone(bd *blockingDone, err error) {
 	mq.mu.Lock()
 	defer mq.mu.Unlock()
 	mq.size -= bd.elSize
+	mq.reqCount -= bd.reqs
+	mq.itemCount -= bd.items
+	mq.byteCount -= bd.bytes
 	mq.hasMoreSpace.Signal()
 	if mq.waitForResult {
 		// In this case the done will be added back to the queue by the waiter.
@@ -183,6 +226,9 @@ func (mq *memoryQueue[T]) Shutdown(context.Context) error {
 func (mq *memoryQueue[T]) Size() int64 {
 	mq.mu.Lock()
 	defer mq.mu.Unlock()
+	if mq.compoundLimits != (request.BatchLimits{}) {
+		return mq.reqCount
+	}
 	return mq.size
 }
 
@@ -234,11 +280,17 @@ type blockingDone struct {
 		onDone(*blockingDone, error)
 	}
 	elSize int64
+	reqs   int64
+	items  int64
+	bytes  int64
 	ch     chan error
 }
 
-func (bd *blockingDone) reset(elSize int64, queue interface{ onDone(*blockingDone, error) }) {
+func (bd *blockingDone) reset(elSize, reqs, items, bytes int64, queue interface{ onDone(*blockingDone, error) }) {
 	bd.elSize = elSize
+	bd.reqs = reqs
+	bd.items = items
+	bd.bytes = bytes
 	bd.queue = queue
 }
 

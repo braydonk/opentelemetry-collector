@@ -50,6 +50,38 @@ func TestConfig_Validate(t *testing.T) {
 	cfg = newTestConfig()
 	cfg.Sizer = request.SizerTypeBytes
 	require.NoError(t, xconfmap.Validate(cfg))
+
+	t.Run("compound sizer valid", func(t *testing.T) {
+		cfg = newTestConfig()
+		cfg.Sizer = request.SizerTypeCompound
+		cfg.QueueSize = 0
+		cfg.CompoundLimits = request.BatchLimits{NumRequests: 100}
+		require.NoError(t, xconfmap.Validate(cfg))
+	})
+
+	t.Run("compound sizer invalid queue_size", func(t *testing.T) {
+		cfg = newTestConfig()
+		cfg.Sizer = request.SizerTypeCompound
+		cfg.QueueSize = 100
+		cfg.CompoundLimits = request.BatchLimits{NumRequests: 100}
+		require.EqualError(t, xconfmap.Validate(cfg), "`queue_size` must not be set when `sizer` is `compound`")
+	})
+
+	t.Run("compound sizer empty limits", func(t *testing.T) {
+		cfg = newTestConfig()
+		cfg.Sizer = request.SizerTypeCompound
+		cfg.QueueSize = 0
+		cfg.CompoundLimits = request.BatchLimits{}
+		require.EqualError(t, xconfmap.Validate(cfg), "`compound_limits` must be set when `sizer` is `compound`")
+	})
+
+	t.Run("non-compound sizer with limits", func(t *testing.T) {
+		cfg = newTestConfig()
+		cfg.Sizer = request.SizerTypeRequests
+		cfg.QueueSize = 100
+		cfg.CompoundLimits = request.BatchLimits{NumRequests: 100}
+		require.EqualError(t, xconfmap.Validate(cfg), "`compound_limits` must not be set when `sizer` is not `compound`")
+	})
 }
 
 func TestBatchConfig_Validate_MetadataKeys(t *testing.T) {

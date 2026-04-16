@@ -334,6 +334,39 @@ func TestPersistentQueue_FullCapacity(t *testing.T) {
 	}
 }
 
+func TestPersistentQueue_CompoundLimits(t *testing.T) {
+	ext := storagetest.NewMockStorageExtension(nil)
+	set := newSettingsWithStorage(request.SizerTypeCompound, 0)
+	set.CompoundLimits = request.BatchLimits{NumRequests: 2, NumItems: 10, NumBytes: 100}
+	pq := newPersistentQueue[intRequest](set)
+	require.NoError(t, pq.Start(context.Background(), hosttest.NewHost(map[component.ID]component.Component{{}: ext})))
+	pQueue := pq.(*persistentQueue[intRequest])
+
+	// Element 1: 1 request, 5 items, 50 bytes
+	require.NoError(t, pQueue.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 1, pQueue.Size())
+
+	// Element 2: 1 request, 5 items, 50 bytes
+	require.NoError(t, pQueue.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 2, pQueue.Size())
+
+	// Element 3: 1 request, 1 item, 10 bytes (exceeds)
+	require.ErrorIs(t, pQueue.Offer(context.Background(), intRequest(1)), ErrQueueIsFull)
+	assert.EqualValues(t, 2, pQueue.Size())
+
+	// Read and consume
+	_, _, done, ok := pQueue.Read(context.Background())
+	assert.True(t, ok)
+	done.OnDone(nil)
+	assert.EqualValues(t, 1, pQueue.Size())
+
+	// Now we can add another
+	require.NoError(t, pQueue.Offer(context.Background(), intRequest(5)))
+	assert.EqualValues(t, 2, pQueue.Size())
+
+	require.NoError(t, pQueue.Shutdown(context.Background()))
+}
+
 func TestPersistentQueue_Shutdown(t *testing.T) {
 	ext := storagetest.NewMockStorageExtension(nil)
 	pq := createTestPersistentQueue(t, ext, request.SizerTypeRequests, 1001)

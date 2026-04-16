@@ -59,6 +59,7 @@ func NewQueueBatch(
 	q, err := queue.NewQueue(queue.Settings[request.Request]{
 		SizerType:        cfg.Sizer,
 		Capacity:         cfg.QueueSize,
+		CompoundLimits:   cfg.CompoundLimits,
 		NumConsumers:     cfg.NumConsumers,
 		WaitForResult:    cfg.WaitForResult,
 		BlockOnOverflow:  cfg.BlockOnOverflow,
