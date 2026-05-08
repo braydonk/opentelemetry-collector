@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/experr"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadatatest"
@@ -474,6 +475,11 @@ func TestDetermineErrorType(t *testing.T) {
 			err:               status.Error(grpccodes.ResourceExhausted, "quota exceeded"),
 			expectedErrorType: "ResourceExhausted",
 		},
+		{
+			name:              "partial success",
+			err:               xconsumererror.NewPartialSuccessError(errors.New("some error"), 3),
+			expectedErrorType: "Partial_Success",
+		},
 	}
 
 	for _, tt := range tests {
@@ -537,6 +543,14 @@ func TestExtractFailureAttributes(t *testing.T) {
 			expected: attribute.NewSet(
 				attribute.String(string(semconv.ErrorTypeKey), "Unavailable"),
 				attribute.Bool(ErrorPermanentKey, false),
+			),
+		},
+		{
+			name: "partial success",
+			err:  xconsumererror.NewPartialSuccessError(errors.New("some error"), 3),
+			expected: attribute.NewSet(
+				attribute.String(string(semconv.ErrorTypeKey), "Partial_Success"),
+				attribute.Bool(ErrorPermanentKey, true),
 			),
 		},
 	}
@@ -628,3 +642,59 @@ type testParams struct {
 	items int
 	err   error
 }
+
+func TestExportPartialSuccessItemCounting(t *testing.T) {
+	totalItems := 10
+	failedItems := int64(3)
+	sentItems := int64(totalItems) - failedItems
+
+	tt := componenttest.NewTelemetry()
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	parentCtx, parentSpan := tt.NewTelemetrySettings().TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+	defer parentSpan.End()
+
+	partialErr := xconsumererror.NewPartialSuccessError(errors.New("some failed"), failedItems)
+	obsrep, err := newObsReportSender(
+		exporter.Settings{ID: exporterID, TelemetrySettings: tt.NewTelemetrySettings(), BuildInfo: component.NewDefaultBuildInfo()},
+		pipeline.SignalTraces,
+		nil,
+		sender.NewSender(func(context.Context, request.Request) error { return partialErr }),
+	)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, obsrep.Send(parentCtx, &requesttest.FakeRequest{Items: totalItems}), partialErr)
+
+	spans := tt.SpanRecorder.Ended()
+	require.Len(t, spans, 1)
+
+	span := spans[0]
+	assert.Equal(t, "exporter/"+exporterID.String()+"/traces", span.Name())
+	require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsSent, Value: attribute.Int64Value(sentItems)})
+	require.Contains(t, span.Attributes(), attribute.KeyValue{Key: ItemsFailed, Value: attribute.Int64Value(failedItems)})
+	assert.Equal(t, codes.Error, span.Status().Code)
+	assert.Equal(t, partialErr.Error(), span.Status().Description)
+
+	metadatatest.AssertEqualExporterSentSpans(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: attribute.NewSet(
+					attribute.String("exporter", exporterID.String())),
+				Value: sentItems,
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+
+	wantAttrs := attribute.NewSet(
+		attribute.String("exporter", exporterID.String()),
+		attribute.String(string(semconv.ErrorTypeKey), "Partial_Success"),
+		attribute.Bool(ErrorPermanentKey, true),
+	)
+	metadatatest.AssertEqualExporterSendFailedSpans(t, tt,
+		[]metricdata.DataPoint[int64]{
+			{
+				Attributes: wantAttrs,
+				Value:      failedItems,
+			},
+		}, metricdatatest.IgnoreTimestamp(), metricdatatest.IgnoreExemplars())
+}
+

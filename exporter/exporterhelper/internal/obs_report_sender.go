@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/consumer/consumererror/xconsumererror"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/experr"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal/metadata"
@@ -103,7 +104,7 @@ func (ors *obsReportSender[K]) Send(ctx context.Context, req K) error {
 	items := req.ItemsCount()
 	// Forward the data to the next consumer (this pusher is the next).
 	err := ors.next.Send(c, req)
-	ors.endOp(c, items, err)
+	ors.endOp(c, int64(items), err)
 	return err
 }
 
@@ -118,7 +119,7 @@ func (ors *obsReportSender[K]) startOp(ctx context.Context) context.Context {
 }
 
 // EndOp completes the export operation that was started with StartOp.
-func (ors *obsReportSender[K]) endOp(ctx context.Context, numRecords int, err error) {
+func (ors *obsReportSender[K]) endOp(ctx context.Context, numRecords int64, err error) {
 	numSent, numFailedToSend := toNumItems(numRecords, err)
 
 	if ors.itemsSentInst != nil {
@@ -139,13 +140,21 @@ func (ors *obsReportSender[K]) endOp(ctx context.Context, numRecords int, err er
 			attribute.Int64(ItemsFailed, numFailedToSend),
 		)
 		if err != nil {
-			span.SetStatus(otelcodes.Error, err.Error())
+			// If the error has status code OK, don't set the span to failed.
+			if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
+				span.SetStatus(otelcodes.Error, err.Error())
+			}
 		}
 	}
 }
 
-func toNumItems(numExportedItems int, err error) (int64, int64) {
+func toNumItems(numExportedItems int64, err error) (int64, int64) {
 	if err != nil {
+		if countableErr, ok := xconsumererror.ErrorAsCountable(err); ok {
+			failedItems := countableErr.Count()
+			exportedItems := numExportedItems - failedItems
+			return exportedItems, failedItems
+		}
 		return 0, int64(numExportedItems)
 	}
 	return int64(numExportedItems), 0
@@ -179,7 +188,10 @@ func determineErrorType(err error) string {
 		return "Deadline_Exceeded"
 	}
 
-	if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
+	if st, ok := status.FromError(err); ok {
+		if st.Code() == codes.OK {
+			return "Partial_Success"
+		}
 		return st.Code().String()
 	}
 
