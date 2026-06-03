@@ -30,7 +30,6 @@ var errMissingGoMod = errors.New("missing gomod specification for module")
 type Config struct {
 	Logger *zap.Logger `mapstructure:"-"`
 
-	OtelColVersion       string `mapstructure:"-"` // only used be the go.mod template
 	SkipGenerate         bool   `mapstructure:"-"`
 	SkipCompilation      bool   `mapstructure:"-"`
 	SkipGetModules       bool   `mapstructure:"-"`
@@ -77,6 +76,7 @@ type Distribution struct {
 	DebugCompilation        bool   `mapstructure:"debug_compilation,omitempty"`
 	CGoEnabled              bool   `mapstructure:"cgo_enabled,omitempty"`
 	UseAbsoluteReplacePaths bool   `mapstructure:"use_absolute_replace_paths,omitempty"`
+	OtelColVersion       string `mapstructure:"otelcol_version"` // only used be the go.mod template
 }
 
 // Module represents a receiver, exporter, processor or extension for the distribution
@@ -105,9 +105,9 @@ func NewDefaultConfig() (*Config, error) {
 	}
 
 	return &Config{
-		OtelColVersion: DefaultBetaOtelColVersion,
 		Logger:         log,
 		Distribution: Distribution{
+			OtelColVersion: DefaultBetaOtelColVersion,
 			OutputPath: outputDir,
 			Module:     "go.opentelemetry.io/collector/cmd/builder",
 		},

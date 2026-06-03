@@ -27,7 +27,7 @@ require (
 	{{if .GoMod}}{{.GoMod}}{{end}}
 	{{- end}}
 	{{if .Telemetry.GoMod}}{{.Telemetry.GoMod}}{{end}}
-	go.opentelemetry.io/collector/otelcol {{.OtelColVersion}}
+	go.opentelemetry.io/collector/otelcol {{.Distribution.OtelColVersion}}
 )
 
 require (
