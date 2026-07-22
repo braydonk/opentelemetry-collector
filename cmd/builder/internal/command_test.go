@@ -86,12 +86,17 @@ func TestApplyFlags(t *testing.T) {
 		},
 		{
 			name:  "All flag values",
-			flags: []string{"--skip-generate=true", "--skip-compilation=true", "--skip-get-modules=true", "--skip-strict-versioning=true", "--ldflags=test", "--gcflags=test", "--verbose=true"},
+			flags: []string{"--skip-generate=true", "--skip-compilation=true", "--skip-get-modules=true", "--skip-strict-versioning=true", "--skip-pre-generate=true", "--skip-post-generate=true", "--skip-pre-build=true", "--skip-post-build=true", "--reinstall-hooks=true", "--ldflags=test", "--gcflags=test", "--verbose=true"},
 			want: &builder.Config{
 				SkipGenerate:         true,
 				SkipCompilation:      true,
 				SkipGetModules:       true,
 				SkipStrictVersioning: true,
+				SkipPreGenerate:      true,
+				SkipPostGenerate:     true,
+				SkipPreBuild:         true,
+				SkipPostBuild:        true,
+				ReinstallHooks:       true,
 				LDFlags:              "test",
 				GCFlags:              "test",
 				Verbose:              true,
@@ -110,6 +115,11 @@ func TestApplyFlags(t *testing.T) {
 			assert.Equal(t, tt.want.SkipCompilation, cfg.SkipCompilation)
 			assert.Equal(t, tt.want.SkipGetModules, cfg.SkipGetModules)
 			assert.Equal(t, tt.want.SkipStrictVersioning, cfg.SkipStrictVersioning)
+			assert.Equal(t, tt.want.SkipPreGenerate, cfg.SkipPreGenerate)
+			assert.Equal(t, tt.want.SkipPostGenerate, cfg.SkipPostGenerate)
+			assert.Equal(t, tt.want.SkipPreBuild, cfg.SkipPreBuild)
+			assert.Equal(t, tt.want.SkipPostBuild, cfg.SkipPostBuild)
+			assert.Equal(t, tt.want.ReinstallHooks, cfg.ReinstallHooks)
 			assert.Equal(t, tt.want.LDFlags, cfg.LDFlags)
 			assert.Equal(t, tt.want.Verbose, cfg.Verbose)
 		})

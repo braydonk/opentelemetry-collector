@@ -1,0 +1,18 @@
+dist:
+  name: otelcol-custom
+  description: Minimal OpenTelemetry Collector Custom Build with Script Plugin Hook
+  output_path: ./build
+
+hooks:
+  plugins:
+    - name: scriptplugin
+      path: "" #{path to POC clone}/cmd/builder/scriptplugin
+  post_generate:
+    - plugin: scriptplugin
+      path: ./post_generate.sh
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.156.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/nopexporter v0.156.0

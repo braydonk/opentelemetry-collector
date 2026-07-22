@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -628,4 +629,44 @@ func TestMarshalYAML(t *testing.T) {
 	assert.NotContains(t, m, "excludes")
 	assert.NotContains(t, m, "conf_resolver")
 	assert.NotContains(t, m, "telemetry")
+}
+
+func TestScriptPluginConfig(t *testing.T) {
+	k := koanf.New(".")
+	require.NoError(t, k.Load(config.DefaultProvider(), yaml.Parser()))
+
+	yamlContent := `
+dist:
+  name: otelcol-custom
+  description: Minimal OpenTelemetry Collector Custom Build with Script Plugin Hook
+  output_path: ./build
+
+hooks:
+  plugins:
+    - name: scriptplugin
+      path: /usr/local/google/home/braydonk/Git/opentelemetry-collector/cmd/builder/scriptplugin
+  post_generate:
+    - plugin: scriptplugin
+      path: ./post_generate.sh
+      args:
+        - "arg1"
+      env:
+        ENV_VAR: "value"
+`
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yamlContent), 0600))
+	require.NoError(t, k.Load(file.Provider(tmpFile), yaml.Parser()))
+
+	cfg := Config{Logger: zaptest.NewLogger(t)}
+	require.NoError(t, k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{Tag: "mapstructure"}))
+
+	require.NoError(t, cfg.Validate())
+	require.NotNil(t, cfg.Hooks)
+	require.Len(t, cfg.Hooks.Plugins, 1)
+	assert.Equal(t, "scriptplugin", cfg.Hooks.Plugins[0].Name)
+	assert.Equal(t, "/usr/local/google/home/braydonk/Git/opentelemetry-collector/cmd/builder/scriptplugin", cfg.Hooks.Plugins[0].Path)
+
+	require.Len(t, cfg.Hooks.PostGenerate, 1)
+	assert.Equal(t, "scriptplugin", cfg.Hooks.PostGenerate[0].Plugin)
+	assert.Equal(t, "./post_generate.sh", cfg.Hooks.PostGenerate[0].Config["path"])
 }

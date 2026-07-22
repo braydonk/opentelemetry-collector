@@ -1,0 +1,28 @@
+dist:
+  name: otelcol-obi
+  description: OpenTelemetry Collector Custom Build with OBI Plugin
+  output_path: ./build
+  otelcol_version: 0.156.0
+
+hooks:
+  plugins:
+    - name: obiplugin
+      path: "" # ${path to POC clone}/cmd/builder/obiplugin
+  pre_generate:
+    - plugin: obiplugin
+      obi_dir: ./internal/obi-src
+      obi_version: v0.10.0
+      cache_dir: ./.local
+
+receivers:
+  - gomod: go.opentelemetry.io/obi v0.24.0
+    import: go.opentelemetry.io/obi/collector
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/nopexporter v0.156.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.156.0
+
+replaces:
+  - go.opentelemetry.io/obi => ../internal/obi-src
+
+

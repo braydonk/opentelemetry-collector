@@ -35,6 +35,11 @@ type Config struct {
 	SkipCompilation      bool   `mapstructure:"-"`
 	SkipGetModules       bool   `mapstructure:"-"`
 	SkipStrictVersioning bool   `mapstructure:"-"`
+	SkipPreGenerate      bool   `mapstructure:"-"`
+	SkipPostGenerate     bool   `mapstructure:"-"`
+	SkipPreBuild         bool   `mapstructure:"-"`
+	SkipPostBuild        bool   `mapstructure:"-"`
+	ReinstallHooks       bool   `mapstructure:"-"`
 	LDFlags              string `mapstructure:"-"`
 	LDSet                bool   `mapstructure:"-"` // only used to override LDFlags
 	GCFlags              string `mapstructure:"-"`
@@ -42,6 +47,7 @@ type Config struct {
 	Verbose              bool   `mapstructure:"-"`
 
 	Distribution      Distribution `mapstructure:"dist"`
+	Hooks             *BuildHooks  `mapstructure:"hooks,omitempty"`
 	Exporters         []Module     `mapstructure:"exporters,omitempty"`
 	Extensions        []Module     `mapstructure:"extensions,omitempty"`
 	Receivers         []Module     `mapstructure:"receivers,omitempty"`
@@ -56,6 +62,27 @@ type Config struct {
 	ConfResolver ConfResolver `mapstructure:"conf_resolver,omitempty"`
 
 	downloadModules retry `mapstructure:"-"`
+}
+
+type BuildHooks struct {
+	Plugins      PluginCollection `mapstructure:"plugins"`
+	PreGenerate  HookCollection   `mapstructure:"pre_generate"`
+	PostGenerate HookCollection   `mapstructure:"post_generate"`
+	PreBuild     HookCollection   `mapstructure:"pre_build"`
+	PostBuild    HookCollection   `mapstructure:"post_build"`
+}
+
+func (h *BuildHooks) Validate() error {
+	if h == nil {
+		return nil
+	}
+	return errors.Join(
+		h.Plugins.Validate(),
+		h.PreGenerate.Validate(),
+		h.PostGenerate.Validate(),
+		h.PreBuild.Validate(),
+		h.PostBuild.Validate(),
+	)
 }
 
 type ConfResolver struct {
@@ -140,6 +167,7 @@ func NewDefaultConfig() (*Config, error) {
 // Validate checks whether the current configuration is valid
 func (c *Config) Validate() error {
 	return multierr.Combine(
+		c.Hooks.Validate(),
 		validateModules("extension", c.Extensions),
 		validateModules("receiver", c.Receivers),
 		validateModules("exporter", c.Exporters),

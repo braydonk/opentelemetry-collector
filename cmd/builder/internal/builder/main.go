@@ -32,16 +32,30 @@ var (
 
 const otelcolPath = "go.opentelemetry.io/collector/otelcol"
 
-func runGoCommand(cfg *Config, args ...string) ([]byte, error) {
+type goCommand struct {
+	dir string
+	env []string
+}
+
+var defaultGoCommand = goCommand{}
+
+func (g goCommand) run(cfg *Config, args ...string) ([]byte, error) {
 	if cfg.Verbose {
 		cfg.Logger.Info("Running go subcommand.", zap.Any("arguments", args))
 	}
 
 	//nolint:gosec // #nosec G204 -- cfg.Distribution.Go is trusted to be a safe path and the caller is assumed to have carried out necessary input validation
 	cmd := exec.Command(cfg.Distribution.Go, args...)
-	cmd.Dir = cfg.Distribution.OutputPath
+	if g.dir != "" {
+		cmd.Dir = g.dir
+	} else {
+		cmd.Dir = cfg.Distribution.OutputPath
+	}
 
 	cmd.Env = os.Environ()
+	for _, envEntry := range g.env {
+		cmd.Env = append(cmd.Env, envEntry)
+	}
 	if cfg.Distribution.CGoEnabled {
 		cmd.Env = append(cmd.Env, "CGO_ENABLED=1")
 	} else {
@@ -64,6 +78,20 @@ func runGoCommand(cfg *Config, args ...string) ([]byte, error) {
 
 // GenerateAndCompile will generate the source files based on the given configuration, update go mod, and will compile into a binary
 func GenerateAndCompile(cfg *Config) error {
+	var plugins InstalledPlugins
+	if cfg.Hooks != nil && len(cfg.Hooks.Plugins) > 0 {
+		var err error
+		plugins, err = cfg.Hooks.Plugins.InstallAll(cfg)
+		if err != nil {
+			return fmt.Errorf("error installing hook plugins: %w", err)
+		}
+		defer plugins.StopAll()
+	}
+
+	if err := RunPreGenerateHooks(cfg, plugins); err != nil {
+		return fmt.Errorf("error running pregenerate hooks: %w", err)
+	}
+
 	if err := Generate(cfg); err != nil {
 		return err
 	}
@@ -73,7 +101,23 @@ func GenerateAndCompile(cfg *Config) error {
 		return err
 	}
 
-	return Compile(cfg)
+	if err := RunPostGenerateHooks(cfg, plugins); err != nil {
+		return fmt.Errorf("error running postgenerate hooks: %w", err)
+	}
+
+	if err := RunPreBuildHooks(cfg, plugins); err != nil {
+		return fmt.Errorf("error running prebuild hooks: %w", err)
+	}
+
+	if err := Compile(cfg); err != nil {
+		return err
+	}
+
+	if err := RunPostBuildHooks(cfg, plugins); err != nil {
+		return fmt.Errorf("error running postbuild hooks: %w", err)
+	}
+
+	return nil
 }
 
 // Generate assembles a new distribution based on the given configuration
@@ -147,7 +191,7 @@ func Compile(cfg *Config) error {
 	if cfg.Distribution.BuildTags != "" {
 		args = append(args, "-tags", cfg.Distribution.BuildTags)
 	}
-	if _, err := runGoCommand(cfg, args...); err != nil {
+	if _, err := defaultGoCommand.run(cfg, args...); err != nil {
 		return fmt.Errorf("%w: %s", errCompileFailed, err.Error())
 	}
 	cfg.Logger.Info("Compiled", zap.String("binary", fmt.Sprintf("%s/%s", cfg.Distribution.OutputPath, binaryName)))
@@ -177,7 +221,7 @@ func GetModules(cfg *Config) error {
 		return nil
 	}
 
-	if _, err := runGoCommand(cfg, "mod", "tidy", "-compat=1.25"); err != nil {
+	if _, err := defaultGoCommand.run(cfg, "mod", "tidy", "-compat=1.25"); err != nil {
 		return fmt.Errorf("failed to update go.mod: %w", err)
 	}
 
@@ -229,7 +273,7 @@ func downloadModules(cfg *Config) error {
 	cfg.Logger.Info("Getting go modules")
 	failReason := "unknown"
 	for i := 1; i <= cfg.downloadModules.numRetries; i++ {
-		if _, err := runGoCommand(cfg, "mod", "download"); err != nil {
+		if _, err := defaultGoCommand.run(cfg, "mod", "download"); err != nil {
 			failReason = err.Error()
 			cfg.Logger.Info("Failed modules download", zap.String("retry", fmt.Sprintf("%d/%d", i, cfg.downloadModules.numRetries)))
 			time.Sleep(cfg.downloadModules.wait)
@@ -252,7 +296,7 @@ func processAndWrite(cfg *Config, tmpl *template.Template, outFile string, tmplP
 
 func readGoModFile(cfg *Config) (string, map[string]string, error) {
 	var modPath string
-	stdout, err := runGoCommand(cfg, "mod", "edit", "-print")
+	stdout, err := defaultGoCommand.run(cfg, "mod", "edit", "-print")
 	if err != nil {
 		return modPath, nil, err
 	}
@@ -271,4 +315,68 @@ func readGoModFile(cfg *Config) (string, map[string]string, error) {
 		dependencies[req.Mod.Path] = req.Mod.Version
 	}
 	return modPath, dependencies, nil
+}
+
+func RunPreGenerateHooks(cfg *Config, plugins InstalledPlugins) error {
+	// If there are no pregenerate hooks considered,
+	// silently move on.
+	if cfg.Hooks == nil || len(cfg.Hooks.PreGenerate) == 0 {
+		return nil
+	}
+	// If the option to skip pregenerate hooks was provided,
+	// inform and move on.
+	if cfg.SkipPreGenerate {
+		cfg.Logger.Info("Skipping pregenerate hooks.")
+		return nil
+	}
+
+	return cfg.Hooks.PreGenerate.RunAll(HookActionPreGenerate, plugins)
+}
+
+func RunPostGenerateHooks(cfg *Config, plugins InstalledPlugins) error {
+	// If there are no postgenerate hooks considered,
+	// silently move on.
+	if cfg.Hooks == nil || len(cfg.Hooks.PostGenerate) == 0 {
+		return nil
+	}
+	// If the option to skip postgenerate hooks was provided,
+	// inform and move on.
+	if cfg.SkipPostGenerate {
+		cfg.Logger.Info("Skipping postgenerate hooks.")
+		return nil
+	}
+
+	return cfg.Hooks.PostGenerate.RunAll(HookActionPostGenerate, plugins)
+}
+
+func RunPreBuildHooks(cfg *Config, plugins InstalledPlugins) error {
+	// If there are no prebuild hooks considered,
+	// silently move on.
+	if cfg.Hooks == nil || len(cfg.Hooks.PreBuild) == 0 {
+		return nil
+	}
+	// If the option to skip prebuild hooks was provided,
+	// inform and move on.
+	if cfg.SkipPreBuild {
+		cfg.Logger.Info("Skipping prebuild hooks.")
+		return nil
+	}
+
+	return cfg.Hooks.PreBuild.RunAll(HookActionPreBuild, plugins)
+}
+
+func RunPostBuildHooks(cfg *Config, plugins InstalledPlugins) error {
+	// If there are no postbuild hooks considered,
+	// silently move on.
+	if cfg.Hooks == nil || len(cfg.Hooks.PostBuild) == 0 {
+		return nil
+	}
+	// If the option to skip postbuild hooks was provided,
+	// inform and move on.
+	if cfg.SkipPostBuild {
+		cfg.Logger.Info("Skipping postbuild hooks.")
+		return nil
+	}
+
+	return cfg.Hooks.PostBuild.RunAll(HookActionPostBuild, plugins)
 }

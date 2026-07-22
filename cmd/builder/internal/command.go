@@ -25,6 +25,11 @@ const (
 	skipCompilationFlag        = "skip-compilation"
 	skipGetModulesFlag         = "skip-get-modules"
 	skipStrictVersioningFlag   = "skip-strict-versioning"
+	skipPreGenerateFlag        = "skip-pre-generate"
+	skipPostGenerateFlag       = "skip-post-generate"
+	skipPreBuildFlag           = "skip-pre-build"
+	skipPostBuildFlag          = "skip-post-build"
+	reinstallHooksFlag         = "reinstall-hooks"
 	ldflagsFlag                = "ldflags"
 	gcflagsFlag                = "gcflags"
 	distributionOutputPathFlag = "output-path"
@@ -81,6 +86,11 @@ func initFlags(flags *flag.FlagSet) error {
 	flags.Bool(skipCompilationFlag, false, "Whether builder should only generate go code with no compile of the collector (default false)")
 	flags.Bool(skipGetModulesFlag, false, "Whether builder should skip updating go.mod and retrieve Go module list (default false)")
 	flags.Bool(skipStrictVersioningFlag, true, "Whether builder should skip strictly checking the calculated versions following dependency resolution")
+	flags.Bool(skipPreGenerateFlag, false, "Whether builder should skip running pre_generate hooks (default false)")
+	flags.Bool(skipPostGenerateFlag, false, "Whether builder should skip running post_generate hooks (default false)")
+	flags.Bool(skipPreBuildFlag, false, "Whether builder should skip running pre_build hooks (default false)")
+	flags.Bool(skipPostBuildFlag, false, "Whether builder should skip running post_build hooks (default false)")
+	flags.Bool(reinstallHooksFlag, false, "Whether builder should reinstall existing hook plugins (default false)")
 	flags.Bool(verboseFlag, false, "Whether builder should print verbose output (default false)")
 	flags.String(ldflagsFlag, "", `ldflags to include in the "go build" command`)
 	flags.String(gcflagsFlag, "", `gcflags to include in the "go build" command`)
@@ -138,6 +148,16 @@ func applyFlags(flags *flag.FlagSet, cfg *builder.Config) error {
 	cfg.SkipGetModules, err = flags.GetBool(skipGetModulesFlag)
 	errs = multierr.Append(errs, err)
 	cfg.SkipStrictVersioning, err = flags.GetBool(skipStrictVersioningFlag)
+	errs = multierr.Append(errs, err)
+	cfg.SkipPreGenerate, err = flags.GetBool(skipPreGenerateFlag)
+	errs = multierr.Append(errs, err)
+	cfg.SkipPostGenerate, err = flags.GetBool(skipPostGenerateFlag)
+	errs = multierr.Append(errs, err)
+	cfg.SkipPreBuild, err = flags.GetBool(skipPreBuildFlag)
+	errs = multierr.Append(errs, err)
+	cfg.SkipPostBuild, err = flags.GetBool(skipPostBuildFlag)
+	errs = multierr.Append(errs, err)
+	cfg.ReinstallHooks, err = flags.GetBool(reinstallHooksFlag)
 	errs = multierr.Append(errs, err)
 
 	if flags.Changed(ldflagsFlag) {
