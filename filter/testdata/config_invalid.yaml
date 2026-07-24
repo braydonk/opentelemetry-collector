@@ -10,3 +10,14 @@ invalid/config_empty:
 invalid/config_both_set:
   - regexp: "1"
     strict: "1"
+invalid/pattern_and_strict:
+  - pattern: "a*"
+    strict: "a"
+invalid/pattern_and_regexp:
+  - pattern: "a*"
+    regexp: "a.*"
+invalid/pattern_strict_regexp:
+  - pattern: "a*"
+    strict: "a"
+    regexp: "a.*"
+

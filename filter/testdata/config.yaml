@@ -6,3 +6,6 @@ regexp/default:
   - regexp: "one|two"
 strict/default:
   - strict: "strict"
+pattern/default:
+  - pattern: "one*two"
+

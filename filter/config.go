@@ -4,16 +4,14 @@
 package filter // import "go.opentelemetry.io/collector/filter"
 
 import (
-	"errors"
+	"fmt"
 	"regexp"
+	"strings"
 )
 
 func validateConfig(c *Config) error {
-	if c.Strict == "" && c.Regexp == "" {
-		return errors.New("must specify either strict or regex")
-	}
-	if c.Strict != "" && c.Regexp != "" {
-		return errors.New("strict and regex cannot be used together")
+	if err := exactlyOneSet(c.Strict, c.Regexp, string(c.Pattern)); err != nil {
+		return fmt.Errorf("only one of string, regex, or pattern are allowed: %w", err)
 	}
 
 	if c.Regexp != "" {
@@ -23,6 +21,26 @@ func validateConfig(c *Config) error {
 		}
 	}
 
+	if c.Pattern != "" {
+		_, err := WildcardCompile(c.Pattern)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func exactlyOneSet(values ...string) error {
+	countSet := 0
+	for _, value := range values {
+		if value != "" {
+			countSet++
+		}
+	}
+	if countSet != 1 {
+		return fmt.Errorf("%d values were set", countSet)
+	}
 	return nil
 }
 
@@ -39,13 +57,19 @@ func CreateFilter(configs []Config) Filter {
 	for _, config := range configs {
 		if config.Strict != "" {
 			cf.stricts[config.Strict] = struct{}{}
+			continue
 		}
 
+		var re *regexp.Regexp
 		if config.Regexp != "" {
 			// Validate() call above ensures that the regex is valid.
-			re := regexp.MustCompile(config.Regexp)
-			cf.regexes = append(cf.regexes, re)
+			re = regexp.MustCompile(config.Regexp)
+		} else if config.Pattern != "" {
+			// Validate() call above ensures that the pattern is valid.
+			re = WildcardMustCompile(config.Pattern)
 		}
+
+		cf.regexes = append(cf.regexes, re)
 	}
 	return cf
 }
@@ -63,4 +87,20 @@ func (cf *combinedFilter) Matches(toMatch any) bool {
 		}
 	}
 	return false
+}
+
+func WildcardMustCompile(wp string) *regexp.Regexp {
+	return regexp.MustCompile(wildcardAsRegexpString(wp))
+}
+
+func WildcardCompile(wp string) (*regexp.Regexp, error) {
+	return regexp.Compile(wildcardAsRegexpString(wp))
+}
+
+func wildcardAsRegexpString(wp string) string {
+	escapedWp := regexp.QuoteMeta(string(wp))
+	escapedWp = "^" + escapedWp + "$"
+	escapedWp = strings.ReplaceAll(escapedWp, `\?`, ".")
+	escapedWp = strings.ReplaceAll(escapedWp, `\*`, ".*")
+	return escapedWp
 }

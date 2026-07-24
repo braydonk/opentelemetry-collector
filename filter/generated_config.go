@@ -8,9 +8,11 @@ import (
 
 // Config config configures the matching behavior of a Filter.
 type Config struct {
-	// Filter using a Go regexp.
+	// Filter using a simple wildcard pattern. Accepted wildcard characters are `?` (single character wildcard) and `*` (n-character wildcard). All other regex characters (such as `.`, common in OpenTelemetry metric names) are treated as literals when using this pattern.
+	Pattern string `mapstructure:"pattern"`
+	// Filter using a Go regex.
 	Regexp string `mapstructure:"regexp"`
-	// Filter using a string literal.
+	// Filter using a literal string.
 	Strict string `mapstructure:"strict"`
 	// prevent unkeyed literal initialization
 	_ struct{}

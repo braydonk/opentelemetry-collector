@@ -5,13 +5,17 @@
     "config": {
       "type": "object",
       "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Filter using a simple wildcard pattern. Accepted wildcard characters are `?` (single character wildcard) and `*` (n-character wildcard). All other regex characters (such as `.`, common in OpenTelemetry metric names) are treated as literals when using this pattern."
+        },
         "regexp": {
           "type": "string",
-          "description": "Filter using a Go regexp."
+          "description": "Filter using a Go regex."
         },
         "strict": {
           "type": "string",
-          "description": "Filter using a string literal."
+          "description": "Filter using a literal string."
         }
       },
       "description": "Config configures the matching behavior of a Filter."
