@@ -339,9 +339,9 @@ func RunPreGenerateHooks(cfg *Config, plugins InstalledPlugins) error {
 	if cfg.Hooks == nil || len(cfg.Hooks.PreGenerate) == 0 {
 		return nil
 	}
-	// If the option to skip pregenerate hooks was provided,
+	// If the option to skip pregenerate hooks was provided or generate was skipped,
 	// inform and move on.
-	if cfg.SkipPreGenerate {
+	if cfg.SkipPreGenerate || cfg.SkipGenerate {
 		cfg.Logger.Info("Skipping pregenerate hooks.")
 		return nil
 	}
@@ -355,9 +355,9 @@ func RunPostGenerateHooks(cfg *Config, plugins InstalledPlugins) error {
 	if cfg.Hooks == nil || len(cfg.Hooks.PostGenerate) == 0 {
 		return nil
 	}
-	// If the option to skip postgenerate hooks was provided,
+	// If the option to skip postgenerate hooks was provided or generate was skipped,
 	// inform and move on.
-	if cfg.SkipPostGenerate {
+	if cfg.SkipPostGenerate || cfg.SkipGenerate {
 		cfg.Logger.Info("Skipping postgenerate hooks.")
 		return nil
 	}
@@ -371,9 +371,9 @@ func RunPreBuildHooks(cfg *Config, plugins InstalledPlugins) error {
 	if cfg.Hooks == nil || len(cfg.Hooks.PreBuild) == 0 {
 		return nil
 	}
-	// If the option to skip prebuild hooks was provided,
+	// If the option to skip prebuild hooks was provided or compilation was skipped,
 	// inform and move on.
-	if cfg.SkipPreBuild {
+	if cfg.SkipPreBuild || cfg.SkipCompilation {
 		cfg.Logger.Info("Skipping prebuild hooks.")
 		return nil
 	}
@@ -387,9 +387,9 @@ func RunPostBuildHooks(cfg *Config, plugins InstalledPlugins) error {
 	if cfg.Hooks == nil || len(cfg.Hooks.PostBuild) == 0 {
 		return nil
 	}
-	// If the option to skip postbuild hooks was provided,
+	// If the option to skip postbuild hooks was provided or compilation was skipped,
 	// inform and move on.
-	if cfg.SkipPostBuild {
+	if cfg.SkipPostBuild || cfg.SkipCompilation {
 		cfg.Logger.Info("Skipping postbuild hooks.")
 		return nil
 	}

@@ -4,11 +4,8 @@ dist:
   output_path: ./build
 
 hooks:
-  plugins:
-    - name: scriptplugin
-      path: "" #{path to POC clone}/cmd/builder/scriptplugin
   post_generate:
-    - plugin: scriptplugin
+    - gomod: ../
       path: ./post_generate.sh
 
 receivers:

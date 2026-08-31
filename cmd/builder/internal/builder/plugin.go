@@ -4,6 +4,7 @@
 package builder
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -64,11 +65,8 @@ func (pc PluginCollection) InstallAll(cfg *Config) (InstalledPlugins, error) {
 	pluginMap := InstalledPlugins{}
 
 	for _, pluginConfig := range pc {
-		// Don't reinstall installed plugins unless asked to.
-		if cfg.ReinstallHooks || !pluginConfig.IsInstalled(pluginDir) {
-			if err := pluginConfig.Install(cfg, pluginDir); err != nil {
-				return nil, err
-			}
+		if err := pluginConfig.Install(cfg, pluginDir); err != nil {
+			return nil, err
 		}
 		// If plugin installs successfully, add it to the map of installed plugins
 		// used by OCB build hooks.
@@ -80,34 +78,44 @@ func (pc PluginCollection) InstallAll(cfg *Config) (InstalledPlugins, error) {
 
 // PluginSourceConfig is the source for a plugin to use in OCB build hooks.
 type PluginSourceConfig struct {
-	// GoMod is a Go Module URL and version to install a remote plugin.
+	// GoMod is a Go Module URL, version, or local path to install a plugin.
 	GoMod string `mapstructure:"gomod"`
-	// GoPath is the path to a local plugin. Only used if `GoMod` is not set.
-	GoPath string `mapstructure:"gopath"`
 }
 
 func (p PluginSourceConfig) Validate() error {
-	if p.GoMod == "" && p.GoPath == "" {
-		return errors.New("plugin is missing installable plugin source, you must set `gopath` or `gomod`")
+	if p.GoMod == "" {
+		return errors.New("plugin is missing installable plugin source, you must set `gomod`")
 	}
 	return nil
 }
 
-func parseGoMod(gomod string) (string, string) {
-	name, version, ok := strings.Cut(gomod, " ")
-	if !ok {
-		return gomod, "latest"
+func (p PluginSourceConfig) isLocal() bool {
+	if strings.HasPrefix(p.GoMod, ".") || strings.HasPrefix(p.GoMod, "/") || filepath.IsAbs(p.GoMod) {
+		return true
 	}
-	return name, version
+	if _, err := os.Stat(p.GoMod); err == nil {
+		return true
+	}
+	return false
+}
+
+func parseRemoteGoMod(gomod string) (string, string) {
+	if name, version, ok := strings.Cut(gomod, " "); ok {
+		return name, version
+	}
+	if name, version, ok := strings.Cut(gomod, "@"); ok {
+		return name, version
+	}
+	return gomod, "latest"
 }
 
 var badCharacter = regexp.MustCompile(`[^a-zA-Z0-9.\-]`)
 
 func (p PluginSourceConfig) PluginName() string {
-	if p.GoMod != "" {
+	if p.isLocal() {
+		return fmt.Sprintf("local:%s", p.GoMod)
+	} else if p.GoMod != "" {
 		return fmt.Sprintf("remote:%s", p.GoMod)
-	} else if p.GoPath != "" {
-		return fmt.Sprintf("local:%s", p.GoPath)
 	} else {
 		panic(fmt.Errorf("attempting to resolve plugin name for invalid plugin source config"))
 	}
@@ -117,16 +125,16 @@ func (p PluginSourceConfig) PluginName() string {
 func (p PluginSourceConfig) BinaryName() string {
 	var name string
 	var version string
-	if p.GoMod != "" {
-		name, version = parseGoMod(p.GoMod)
-	} else if p.GoPath != "" {
-		name = p.GoPath
+	if p.isLocal() {
+		name = p.GoMod
 		version = "local"
+	} else if p.GoMod != "" {
+		name, version = parseRemoteGoMod(p.GoMod)
 	} else {
 		panic(fmt.Errorf("attempting to resolve binary name for invalid plugin source config"))
 	}
 
-	// Espace name for use as file name
+	// Escape name for use as file name
 	name = badCharacter.ReplaceAllStringFunc(name, func(s string) string {
 		return fmt.Sprintf("_%x_", s)
 	})
@@ -146,8 +154,8 @@ func (p PluginSourceConfig) IsInstalled(pluginDir string) bool {
 
 // Install installs the plugin binary into the specified pluginDir directory.
 func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
-	if p.GoPath == "" && p.GoMod == "" {
-		return errors.New("either GoPath or GoMod must be specified to install plugin")
+	if p.GoMod == "" {
+		return errors.New("gomod must be specified to install plugin")
 	}
 
 	// Ensure we've been passed a valid plugin directory.
@@ -169,11 +177,11 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 
 	var target string
 	var workDir string
-	if p.GoPath != "" {
+	if p.isLocal() {
 		target = "."
-		workDir = p.GoPath
+		workDir = p.GoMod
 	} else {
-		mod, version := parseGoMod(p.GoMod)
+		mod, version := parseRemoteGoMod(p.GoMod)
 		target = fmt.Sprintf("%s@%s", mod, version)
 	}
 
@@ -234,21 +242,13 @@ func (ip *InstalledPlugin) run(action string, config map[string]any) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp("", "ocb-plugin-input-*.yaml")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.Write(inputBytes)
-	if err == nil {
-		err = f.Sync()
-	}
 
-	cmd := exec.Command(ip.path, f.Name())
+	cmd := exec.Command(ip.path)
+	cmd.Stdin = bytes.NewReader(inputBytes)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("error running hook: %v", err)
+		return fmt.Errorf("error running hook: %w", err)
 	}
 	return nil
 }

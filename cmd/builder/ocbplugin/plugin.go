@@ -5,8 +5,8 @@ package ocbplugin
 
 import (
 	"errors"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"go.yaml.in/yaml/v3"
@@ -28,20 +28,26 @@ type inputData struct {
 
 // RunPlugin runs an OCBPlugin implementation. This should be called from main.
 func RunPlugin(impl OCBPlugin) {
-	flag.Parse()
-	inputPath := flag.Arg(0)
-	inputBytes, err := os.ReadFile(inputPath)
-	var input inputData
-	if err == nil {
-		err = yaml.Unmarshal(inputBytes, &input)
-	}
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error reading plugin input: %s\n", err)
+	if err := runPlugin(impl, os.Stdin, os.Stdout); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func runPlugin(impl OCBPlugin, stdin io.Reader, stdout io.Writer) error {
+	inputBytes, err := io.ReadAll(stdin)
+	if err != nil {
+		return fmt.Errorf("error reading plugin input: %w", err)
+	}
+	var input inputData
+	if err := yaml.Unmarshal(inputBytes, &input); err != nil {
+		return fmt.Errorf("error decoding plugin input: %w", err)
 	}
 	switch input.Action {
 	case "min-ocb-version":
-		fmt.Println(impl.MinOCBVersion())
+		fmt.Fprintln(stdout, impl.MinOCBVersion())
+		return nil
 	case "pre-generate":
 		err = impl.PreGenerate(input.Config)
 	case "post-generate":
@@ -54,10 +60,9 @@ func RunPlugin(impl OCBPlugin) {
 		err = fmt.Errorf("unknown plugin action %q", input.Action)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error running '%s' plugin action: %s\n", input.Action, err)
-		os.Exit(1)
+		return fmt.Errorf("error running '%s' plugin action: %w", input.Action, err)
 	}
-	os.Exit(0)
+	return nil
 }
 
 var (
