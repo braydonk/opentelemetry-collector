@@ -235,16 +235,15 @@ func (ip *InstalledPlugin) run(action string, config map[string]any) error {
 		return err
 	}
 	f, err := os.CreateTemp("", "ocb-plugin-input-*.yaml")
-	defer f.Close()
-	if err == nil {
-		_, err = f.Write(inputBytes)
-		if err == nil {
-			err = f.Sync()
-		}
-	}
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+	_, err = f.Write(inputBytes)
+	if err == nil {
+		err = f.Sync()
+	}
+
 	cmd := exec.Command(ip.path, f.Name())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
