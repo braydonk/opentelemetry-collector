@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
-	"github.com/hashicorp/go-plugin"
-	"go.opentelemetry.io/collector/cmd/builder/ocbplugin"
+	"go.yaml.in/yaml/v3"
 )
 
 const (
@@ -71,7 +72,7 @@ func (pc PluginCollection) InstallAll(cfg *Config) (InstalledPlugins, error) {
 		}
 		// If plugin installs successfully, add it to the map of installed plugins
 		// used by OCB build hooks.
-		pluginMap.Add(pluginConfig.Name, pluginConfig.InstallPath(pluginDir), cfg.Verbose)
+		pluginMap.Add(pluginConfig.PluginName(), pluginConfig.InstallPath(pluginDir), cfg.Verbose)
 	}
 
 	return pluginMap, nil
@@ -79,54 +80,58 @@ func (pc PluginCollection) InstallAll(cfg *Config) (InstalledPlugins, error) {
 
 // PluginSourceConfig is the source for a plugin to use in OCB build hooks.
 type PluginSourceConfig struct {
-	// Name is the user-decided name of the plugin to use within the config.
-	Name string `mapstructure:"name"`
-
-	// Module is a Go Module URL to install a remote plugin.
-	Module string `mapstructure:"module"`
-	// Version is the Go Module version to use for a remote plugin.
-	Version string `mapstructure:"version"`
-
-	// Path is the path to a local plugin. Only used if `Module` is not set.
-	Path string `mapstructure:"path"`
+	// GoMod is a Go Module URL and version to install a remote plugin.
+	GoMod string `mapstructure:"gomod"`
+	// GoPath is the path to a local plugin. Only used if `GoMod` is not set.
+	GoPath string `mapstructure:"gopath"`
 }
 
 func (p PluginSourceConfig) Validate() error {
-	if p.Name == "" {
-		return fmt.Errorf("missing plugin name")
+	if p.GoMod == "" && p.GoPath == "" {
+		return errors.New("plugin is missing installable plugin source, you must set `gopath` or `gomod`")
 	}
-
-	if p.Module == "" && p.Path == "" {
-		return fmt.Errorf("plugin %s is missing installable plugin source, you must set `path` or `module`", p.Name)
-	}
-
 	return nil
 }
 
-// BinaryName returns the binary name to use for the plugin, using fallback if Name is not specified.
-func (p PluginSourceConfig) BinaryName() string {
-	var version string
-	if p.Module != "" {
-		// When a version is not specified, the installation is done with `latest`.
-		version = "latest"
-		if p.Version != "" {
-			version = p.Version
-		}
-	} else if p.Path != "" {
-		// Locally installed plugins don't get a version discriminator.
-		// We still need to disambiguate between a local copy of a plugin
-		// and a potential to remotely install the same plugin.
-		version = "local"
+func parseGoMod(gomod string) (string, string) {
+	name, version, ok := strings.Cut(gomod, " ")
+	if !ok {
+		return gomod, "latest"
 	}
+	return name, version
+}
 
-	if version != "" {
-		return fmt.Sprintf("%s_%s", p.Name, version)
+var badCharacter = regexp.MustCompile(`[^a-zA-Z0-9.\-]`)
+
+func (p PluginSourceConfig) PluginName() string {
+	if p.GoMod != "" {
+		return fmt.Sprintf("remote:%s", p.GoMod)
+	} else if p.GoPath != "" {
+		return fmt.Sprintf("local:%s", p.GoPath)
+	} else {
+		panic(fmt.Errorf("attempting to resolve plugin name for invalid plugin source config"))
 	}
-	if p.Name == "" {
-		// Should be an impossible state.
+}
+
+// BinaryName returns the binary name to use for the plugin
+func (p PluginSourceConfig) BinaryName() string {
+	var name string
+	var version string
+	if p.GoMod != "" {
+		name, version = parseGoMod(p.GoMod)
+	} else if p.GoPath != "" {
+		name = p.GoPath
+		version = "local"
+	} else {
 		panic(fmt.Errorf("attempting to resolve binary name for invalid plugin source config"))
 	}
-	return p.Name
+
+	// Espace name for use as file name
+	name = badCharacter.ReplaceAllStringFunc(name, func(s string) string {
+		return fmt.Sprintf("_%x_", s)
+	})
+
+	return fmt.Sprintf("%s_%s", name, version)
 }
 
 func (p PluginSourceConfig) InstallPath(pluginDir string) string {
@@ -141,8 +146,8 @@ func (p PluginSourceConfig) IsInstalled(pluginDir string) bool {
 
 // Install installs the plugin binary into the specified pluginDir directory.
 func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
-	if p.Path == "" && p.Module == "" {
-		return errors.New("either Path or Module must be specified to install plugin")
+	if p.GoPath == "" && p.GoMod == "" {
+		return errors.New("either GoPath or GoMod must be specified to install plugin")
 	}
 
 	// Ensure we've been passed a valid plugin directory.
@@ -164,19 +169,12 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 
 	var target string
 	var workDir string
-	if p.Path != "" {
+	if p.GoPath != "" {
 		target = "."
-		workDir = p.Path
+		workDir = p.GoPath
 	} else {
-		version := p.Version
-		if version == "" {
-			version = "latest"
-		}
-		if strings.Contains(p.Module, "@") {
-			target = p.Module
-		} else {
-			target = fmt.Sprintf("%s@%s", p.Module, version)
-		}
+		mod, version := parseGoMod(p.GoMod)
+		target = fmt.Sprintf("%s@%s", mod, version)
 	}
 
 	tempGOBIN, err := os.MkdirTemp(absPluginDir, ".tmp-install-*")
@@ -190,7 +188,7 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 		env: []string{"GOBIN=" + tempGOBIN},
 	}.run(cfg, "install", target)
 	if err != nil {
-		return fmt.Errorf("failed to install plugin %q: %w", p.Name, err)
+		return fmt.Errorf("failed to install plugin %q: %w", p.PluginName(), err)
 	}
 
 	entries, err := os.ReadDir(tempGOBIN)
@@ -207,7 +205,7 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 	}
 
 	if installedBinary == "" {
-		return fmt.Errorf("no binary installed for plugin %q", p.Name)
+		return fmt.Errorf("no binary installed for plugin %q", p.PluginName())
 	}
 
 	src := filepath.Join(tempGOBIN, installedBinary)
@@ -223,90 +221,60 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 type InstalledPlugin struct {
 	path    string
 	verbose bool
-
-	client         *plugin.Client
-	pluginInstance ocbplugin.OCBPlugin
 }
 
-func (ip *InstalledPlugin) Start() error {
-	client := ocbplugin.NewClient(ip.path, ip.verbose)
+type inputData struct {
+	Action string         `yaml:"action"`
+	Config map[string]any `yaml:"config"`
+}
 
-	rpcClient, err := client.Client()
+func (ip *InstalledPlugin) run(action string, config map[string]any) error {
+	input := inputData{Action: action, Config: config}
+	inputBytes, err := yaml.Marshal(&input)
 	if err != nil {
-		return fmt.Errorf("failed to create RPC client for plugin %q: %w", ip.path, err)
+		return err
 	}
-
-	raw, err := rpcClient.Dispense(ocbplugin.PluginName)
+	f, err := os.CreateTemp("", "ocb-plugin-input-*.yaml")
+	defer f.Close()
+	if err == nil {
+		_, err = f.Write(inputBytes)
+		if err == nil {
+			err = f.Sync()
+		}
+	}
 	if err != nil {
-		client.Kill()
-		return fmt.Errorf("failed to dispense plugin %q: %w", ip.path, err)
+		return err
 	}
-
-	p, ok := raw.(ocbplugin.OCBPlugin)
-	if !ok {
-		client.Kill()
-		return fmt.Errorf("plugin %q does not implement OCBPlugin interface", ip.path)
+	cmd := exec.Command(ip.path, f.Name())
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("error running hook: %v", err)
 	}
-
-	ip.client = client
-	ip.pluginInstance = p
-
 	return nil
 }
 
-func (ip *InstalledPlugin) Stop() {
-	if ip.client != nil {
-		ip.client.Kill()
-	}
-}
-
 func (ip *InstalledPlugin) RunPreGenerate(data map[string]any) error {
-	if ip.pluginInstance == nil {
-		if err := ip.Start(); err != nil {
-			return err
-		}
-	}
-	return ip.pluginInstance.PreGenerate(data)
+	return ip.run("pre-generate", data)
 }
 
 func (ip *InstalledPlugin) RunPostGenerate(data map[string]any) error {
-	if ip.pluginInstance == nil {
-		if err := ip.Start(); err != nil {
-			return err
-		}
-	}
-	return ip.pluginInstance.PostGenerate(data)
+	return ip.run("post-generate", data)
 }
 
 func (ip *InstalledPlugin) RunPreBuild(data map[string]any) error {
-	if ip.pluginInstance == nil {
-		if err := ip.Start(); err != nil {
-			return err
-		}
-	}
-	return ip.pluginInstance.PreBuild(data)
+	return ip.run("pre-build", data)
 }
 
 func (ip *InstalledPlugin) RunPostBuild(data map[string]any) error {
-	if ip.pluginInstance == nil {
-		if err := ip.Start(); err != nil {
-			return err
-		}
-	}
-	return ip.pluginInstance.PostBuild(data)
+	return ip.run("post-build", data)
 }
 
 type InstalledPlugins map[string]*InstalledPlugin
 
-func (ip InstalledPlugins) Add(name, installPath string, verbose bool) {
+func (ip InstalledPlugins) Add(name string, installPath string, verbose bool) {
 	ip[name] = &InstalledPlugin{
 		path:    installPath,
 		verbose: verbose,
-	}
-}
-
-func (ip InstalledPlugins) StopAll() {
-	for _, p := range ip {
-		p.Stop()
 	}
 }

@@ -8,5 +8,5 @@ import (
 )
 
 func main() {
-	ocbplugin.Serve(&ScriptPlugin{})
+	ocbplugin.RunPlugin(&ScriptPlugin{})
 }

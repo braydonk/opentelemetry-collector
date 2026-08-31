@@ -79,13 +79,29 @@ func (g goCommand) run(cfg *Config, args ...string) ([]byte, error) {
 // GenerateAndCompile will generate the source files based on the given configuration, update go mod, and will compile into a binary
 func GenerateAndCompile(cfg *Config) error {
 	var plugins InstalledPlugins
-	if cfg.Hooks != nil && len(cfg.Hooks.Plugins) > 0 {
+	if cfg.Hooks != nil {
+		pluginSet := map[PluginSourceConfig]struct{}{}
+		for _, hook := range cfg.Hooks.PreGenerate {
+			pluginSet[hook.PluginSourceConfig] = struct{}{}
+		}
+		for _, hook := range cfg.Hooks.PostGenerate {
+			pluginSet[hook.PluginSourceConfig] = struct{}{}
+		}
+		for _, hook := range cfg.Hooks.PreBuild {
+			pluginSet[hook.PluginSourceConfig] = struct{}{}
+		}
+		for _, hook := range cfg.Hooks.PostBuild {
+			pluginSet[hook.PluginSourceConfig] = struct{}{}
+		}
+		var pluginCollection PluginCollection
+		for cfg := range pluginSet {
+			pluginCollection = append(pluginCollection, cfg)
+		}
 		var err error
-		plugins, err = cfg.Hooks.Plugins.InstallAll(cfg)
+		plugins, err = pluginCollection.InstallAll(cfg)
 		if err != nil {
 			return fmt.Errorf("error installing hook plugins: %w", err)
 		}
-		defer plugins.StopAll()
 	}
 
 	if err := RunPreGenerateHooks(cfg, plugins); err != nil {

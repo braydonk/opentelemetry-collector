@@ -8,5 +8,5 @@ import (
 )
 
 func main() {
-	ocbplugin.Serve(&OBIPlugin{})
+	ocbplugin.RunPlugin(&OBIPlugin{})
 }

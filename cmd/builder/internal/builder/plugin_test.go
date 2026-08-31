@@ -18,13 +18,11 @@ func TestPluginSourceConfigInstall_MissingSource(t *testing.T) {
 	require.NoError(t, err)
 	pluginDir := t.TempDir()
 
-	p := PluginSourceConfig{
-		Name: "test-plugin",
-	}
+	p := PluginSourceConfig{}
 
 	err = p.Install(cfg, pluginDir)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "either Path or Module must be specified")
+	assert.Contains(t, err.Error(), "either GoPath or GoMod must be specified")
 }
 
 func TestPluginSourceConfigInstall_NonExistentPluginDir(t *testing.T) {
@@ -33,8 +31,7 @@ func TestPluginSourceConfigInstall_NonExistentPluginDir(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "does_not_exist")
 
 	p := PluginSourceConfig{
-		Name: "test-plugin",
-		Path: t.TempDir(),
+		GoPath: t.TempDir(),
 	}
 
 	err = p.Install(cfg, nonExistentDir)
@@ -71,8 +68,7 @@ func main() {
 	cfg.Distribution.Go = "go"
 
 	p := PluginSourceConfig{
-		Name: "custom-plugin-name",
-		Path: pluginSourceDir,
+		GoPath: pluginSourceDir,
 	}
 
 	err = p.Install(cfg, pluginDir)
@@ -96,9 +92,7 @@ func TestPluginSourceConfigInstall_InvalidModule(t *testing.T) {
 	cfg.Distribution.Go = "go"
 
 	p := PluginSourceConfig{
-		Name:    "invalid-plugin",
-		Module:  "example.com/nonexistent/module/url",
-		Version: "v1.0.0",
+		GoMod: "example.com/nonexistent/module/url v1.0.0",
 	}
 	err = p.Install(cfg, pluginDir)
 	require.Error(t, err)

@@ -65,11 +65,10 @@ type Config struct {
 }
 
 type BuildHooks struct {
-	Plugins      PluginCollection `mapstructure:"plugins"`
-	PreGenerate  HookCollection   `mapstructure:"pre_generate"`
-	PostGenerate HookCollection   `mapstructure:"post_generate"`
-	PreBuild     HookCollection   `mapstructure:"pre_build"`
-	PostBuild    HookCollection   `mapstructure:"post_build"`
+	PreGenerate  HookCollection `mapstructure:"pre_generate"`
+	PostGenerate HookCollection `mapstructure:"post_generate"`
+	PreBuild     HookCollection `mapstructure:"pre_build"`
+	PostBuild    HookCollection `mapstructure:"post_build"`
 }
 
 func (h *BuildHooks) Validate() error {
@@ -77,7 +76,6 @@ func (h *BuildHooks) Validate() error {
 		return nil
 	}
 	return errors.Join(
-		h.Plugins.Validate(),
 		h.PreGenerate.Validate(),
 		h.PostGenerate.Validate(),
 		h.PreBuild.Validate(),

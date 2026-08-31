@@ -26,9 +26,9 @@ func (hc HookCollection) Validate() error {
 
 func (hc HookCollection) RunAll(action HookAction, pluginMap InstalledPlugins) error {
 	for _, hook := range hc {
-		plugin, ok := pluginMap[hook.Plugin]
+		plugin, ok := pluginMap[hook.PluginName()]
 		if !ok {
-			return fmt.Errorf("build hook requested unrecognized plugin \"%s\"", hook.Plugin)
+			return fmt.Errorf("build hook requested unrecognized plugin \"%s\"", hook.PluginName())
 		}
 
 		var err error
@@ -54,14 +54,6 @@ func (hc HookCollection) RunAll(action HookAction, pluginMap InstalledPlugins) e
 }
 
 type HookConfig struct {
-	Plugin string         `mapstructure:"plugin"`
-	Config map[string]any `mapstructure:",remain"`
-}
-
-func (h HookConfig) Validate() error {
-	if h.Plugin == "" {
-		return errors.New("hook config missing required field `plugin`")
-	}
-
-	return nil
+	PluginSourceConfig `mapstructure:",squash"`
+	Config             map[string]any `mapstructure:",remain"`
 }
