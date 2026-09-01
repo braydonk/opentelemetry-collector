@@ -254,6 +254,7 @@ func (ip *InstalledPlugin) run(action string, config map[string]any) error {
 	}
 
 	cmd := exec.Command(ip.path, f.Name())
+	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

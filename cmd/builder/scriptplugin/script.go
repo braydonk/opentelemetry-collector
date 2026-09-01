@@ -4,10 +4,13 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
 	"go.opentelemetry.io/collector/cmd/builder/ocbplugin"
@@ -23,7 +26,32 @@ type Config struct {
 }
 
 // ScriptPlugin implements ocbplugin.OCBPlugin by executing a bash script.
-type ScriptPlugin struct{}
+type ScriptPlugin struct {
+	stdin  io.Reader
+	stdout io.Writer
+	stderr io.Writer
+}
+
+func (s *ScriptPlugin) getStdin() io.Reader {
+	if s.stdin != nil {
+		return s.stdin
+	}
+	return os.Stdin
+}
+
+func (s *ScriptPlugin) getStdout() io.Writer {
+	if s.stdout != nil {
+		return s.stdout
+	}
+	return os.Stdout
+}
+
+func (s *ScriptPlugin) getStderr() io.Writer {
+	if s.stderr != nil {
+		return s.stderr
+	}
+	return os.Stderr
+}
 
 func (s *ScriptPlugin) PreGenerate(config map[string]any) error {
 	return s.run(config)
@@ -47,19 +75,29 @@ func (s *ScriptPlugin) MinOCBVersion() string {
 
 func (s *ScriptPlugin) run(config map[string]any) error {
 	var cfg Config
-	if err := mapstructure.Decode(config, &cfg); err != nil {
+	if err := mapstructure.WeakDecode(config, &cfg); err != nil {
 		return fmt.Errorf("failed to decode script plugin configuration: %w", err)
 	}
 
 	if cfg.Path == "" {
-		return errors.New("no script path specified in configuration (`path` field required)")
+		fmt.Fprint(s.getStdout(), "Enter script path: ")
+		scanner := bufio.NewScanner(s.getStdin())
+		if scanner.Scan() {
+			cfg.Path = strings.TrimSpace(scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("failed to read script path: %w", err)
+		}
+		if cfg.Path == "" {
+			return errors.New("no script path provided")
+		}
 	}
 
 	cmdArgs := append([]string{cfg.Path}, cfg.Args...)
 	cmd := exec.Command("bash", cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
+	cmd.Stdout = s.getStdout()
+	cmd.Stderr = s.getStderr()
+	cmd.Stdin = s.getStdin()
 
 	if len(cfg.Env) > 0 {
 		cmd.Env = os.Environ()
