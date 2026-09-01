@@ -31,7 +31,7 @@ func TestPluginSourceConfigInstall_NonExistentPluginDir(t *testing.T) {
 	nonExistentDir := filepath.Join(t.TempDir(), "does_not_exist")
 
 	p := PluginSourceConfig{
-		GoMod: t.TempDir(),
+		Plugin: t.TempDir(),
 	}
 
 	err = p.Install(cfg, nonExistentDir)
@@ -76,7 +76,7 @@ func main() {
 	cfg.Distribution.Go = "go"
 
 	p := PluginSourceConfig{
-		GoMod: pluginSourceDir,
+		Plugin: pluginSourceDir,
 	}
 
 	err = p.Install(cfg, pluginDir)
@@ -130,10 +130,10 @@ func TestHookSkipping(t *testing.T) {
 	require.NoError(t, err)
 	cfg.Logger = zap.NewNop()
 	cfg.Hooks = &BuildHooks{
-		PreGenerate:  HookCollection{{PluginSourceConfig: PluginSourceConfig{GoMod: "dummy"}}},
-		PostGenerate: HookCollection{{PluginSourceConfig: PluginSourceConfig{GoMod: "dummy"}}},
-		PreBuild:     HookCollection{{PluginSourceConfig: PluginSourceConfig{GoMod: "dummy"}}},
-		PostBuild:    HookCollection{{PluginSourceConfig: PluginSourceConfig{GoMod: "dummy"}}},
+		PreGenerate:  HookCollection{{PluginSourceConfig: PluginSourceConfig{Plugin: "dummy"}}},
+		PostGenerate: HookCollection{{PluginSourceConfig: PluginSourceConfig{Plugin: "dummy"}}},
+		PreBuild:     HookCollection{{PluginSourceConfig: PluginSourceConfig{Plugin: "dummy"}}},
+		PostBuild:    HookCollection{{PluginSourceConfig: PluginSourceConfig{Plugin: "dummy"}}},
 	}
 
 	plugins := InstalledPlugins{} // empty, so any run would fail with unrecognized plugin
@@ -161,7 +161,7 @@ func TestPluginSourceConfigInstall_InvalidModule(t *testing.T) {
 	cfg.Distribution.Go = "go"
 
 	p := PluginSourceConfig{
-		GoMod: "example.com/nonexistent/module/url v1.0.0",
+		Plugin: "example.com/nonexistent/module/url v1.0.0",
 	}
 	err = p.Install(cfg, pluginDir)
 	require.Error(t, err)

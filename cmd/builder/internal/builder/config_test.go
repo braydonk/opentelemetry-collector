@@ -660,6 +660,6 @@ hooks:
 	require.NoError(t, cfg.Validate())
 	require.NotNil(t, cfg.Hooks)
 	require.Len(t, cfg.Hooks.PostGenerate, 1)
-	assert.Equal(t, "/usr/local/google/home/braydonk/Git/opentelemetry-collector/cmd/builder/scriptplugin", cfg.Hooks.PostGenerate[0].GoMod)
+	assert.Equal(t, "/usr/local/google/home/braydonk/Git/opentelemetry-collector/cmd/builder/scriptplugin", cfg.Hooks.PostGenerate[0].Plugin)
 	assert.Equal(t, "./post_generate.sh", cfg.Hooks.PostGenerate[0].Config["path"])
 }

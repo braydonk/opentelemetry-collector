@@ -77,22 +77,22 @@ func (pc PluginCollection) InstallAll(cfg *Config) (InstalledPlugins, error) {
 
 // PluginSourceConfig is the source for a plugin to use in OCB build hooks.
 type PluginSourceConfig struct {
-	// GoMod is a Go Module URL, version, or local path to install a plugin.
-	GoMod string `mapstructure:"gomod"`
+	// Plugin is a Go Module URL, version, or local path to install a plugin.
+	Plugin string `mapstructure:"plugin"`
 }
 
 func (p PluginSourceConfig) Validate() error {
-	if p.GoMod == "" {
+	if p.Plugin == "" {
 		return errors.New("plugin is missing installable plugin source, you must set `gomod`")
 	}
 	return nil
 }
 
 func (p PluginSourceConfig) isLocal() bool {
-	if strings.HasPrefix(p.GoMod, ".") || strings.HasPrefix(p.GoMod, "/") || filepath.IsAbs(p.GoMod) {
+	if strings.HasPrefix(p.Plugin, ".") || strings.HasPrefix(p.Plugin, "/") || filepath.IsAbs(p.Plugin) {
 		return true
 	}
-	if _, err := os.Stat(p.GoMod); err == nil {
+	if _, err := os.Stat(p.Plugin); err == nil {
 		return true
 	}
 	return false
@@ -112,9 +112,9 @@ var badCharacter = regexp.MustCompile(`[^a-zA-Z0-9.\-]`)
 
 func (p PluginSourceConfig) PluginName() string {
 	if p.isLocal() {
-		return fmt.Sprintf("local:%s", p.GoMod)
-	} else if p.GoMod != "" {
-		return fmt.Sprintf("remote:%s", p.GoMod)
+		return fmt.Sprintf("local:%s", p.Plugin)
+	} else if p.Plugin != "" {
+		return fmt.Sprintf("remote:%s", p.Plugin)
 	} else {
 		panic(fmt.Errorf("attempting to resolve plugin name for invalid plugin source config"))
 	}
@@ -125,10 +125,10 @@ func (p PluginSourceConfig) BinaryName() string {
 	var name string
 	var version string
 	if p.isLocal() {
-		name = p.GoMod
+		name = p.Plugin
 		version = "local"
-	} else if p.GoMod != "" {
-		name, version = parseRemoteGoMod(p.GoMod)
+	} else if p.Plugin != "" {
+		name, version = parseRemoteGoMod(p.Plugin)
 	} else {
 		panic(fmt.Errorf("attempting to resolve binary name for invalid plugin source config"))
 	}
@@ -153,7 +153,7 @@ func (p PluginSourceConfig) IsInstalled(pluginDir string) bool {
 
 // Install installs the plugin binary into the specified pluginDir directory.
 func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
-	if p.GoMod == "" {
+	if p.Plugin == "" {
 		return errors.New("gomod must be specified to install plugin")
 	}
 
@@ -178,9 +178,9 @@ func (p PluginSourceConfig) Install(cfg *Config, pluginDir string) error {
 	var workDir string
 	if p.isLocal() {
 		target = "."
-		workDir = p.GoMod
+		workDir = p.Plugin
 	} else {
-		mod, version := parseRemoteGoMod(p.GoMod)
+		mod, version := parseRemoteGoMod(p.Plugin)
 		target = fmt.Sprintf("%s@%s", mod, version)
 	}
 
