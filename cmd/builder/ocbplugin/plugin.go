@@ -5,6 +5,7 @@ package ocbplugin
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -28,15 +29,17 @@ type inputData struct {
 
 // RunPlugin runs an OCBPlugin implementation. This should be called from main.
 func RunPlugin(impl OCBPlugin) {
-	if err := runPlugin(impl, os.Stdin, os.Stdout); err != nil {
+	flag.Parse()
+	inputPath := flag.Arg(0)
+	if err := runPlugin(impl, inputPath, os.Stdout); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 	os.Exit(0)
 }
 
-func runPlugin(impl OCBPlugin, stdin io.Reader, stdout io.Writer) error {
-	inputBytes, err := io.ReadAll(stdin)
+func runPlugin(impl OCBPlugin, inputPath string, stdout io.Writer) error {
+	inputBytes, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("error reading plugin input: %w", err)
 	}

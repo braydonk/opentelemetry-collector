@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,4 +46,28 @@ func TestScriptPlugin_Run(t *testing.T) {
 	err = plugin.PostBuild(map[string]any{"path": filepath.Join(tempDir, "nonexistent.sh")})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed")
+}
+
+func TestScriptPlugin_EmptyPathWithEnvConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	outputFile := filepath.Join(tempDir, "output.txt")
+
+	scriptPath := filepath.Join(tempDir, "test.sh")
+	scriptContent := "#!/bin/bash\necho \"TEST=$TEST\" > " + outputFile + "\n"
+	require.NoError(t, os.WriteFile(scriptPath, []byte(scriptContent), 0755))
+
+	var stdout bytes.Buffer
+	plugin := &ScriptPlugin{}
+
+	err := plugin.PreGenerate(map[string]any{
+		"env": map[string]any{
+			"TEST": 0,
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "Enter script path: ", stdout.String())
+
+	content, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Equal(t, "TEST=0\n", string(content))
 }

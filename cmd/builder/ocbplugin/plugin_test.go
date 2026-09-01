@@ -6,7 +6,8 @@ package ocbplugin
 import (
 	"bytes"
 	"errors"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,8 +100,10 @@ func TestRunPlugin_LifecycleActions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &mockPlugin{}
 			input := "action: " + tt.action + "\nconfig:\n  key: foo\n"
+			inputFile := filepath.Join(t.TempDir(), "input.yaml")
+			require.NoError(t, os.WriteFile(inputFile, []byte(input), 0600))
 			var stdout bytes.Buffer
-			err := runPlugin(m, strings.NewReader(input), &stdout)
+			err := runPlugin(m, inputFile, &stdout)
 			require.NoError(t, err)
 			tt.validate(t, m)
 		})
@@ -110,8 +113,10 @@ func TestRunPlugin_LifecycleActions(t *testing.T) {
 func TestRunPlugin_MinOCBVersion(t *testing.T) {
 	m := &mockPlugin{minVersion: "v0.157.0"}
 	input := "action: min-ocb-version\n"
+	inputFile := filepath.Join(t.TempDir(), "input.yaml")
+	require.NoError(t, os.WriteFile(inputFile, []byte(input), 0600))
 	var stdout bytes.Buffer
-	err := runPlugin(m, strings.NewReader(input), &stdout)
+	err := runPlugin(m, inputFile, &stdout)
 	require.NoError(t, err)
 	assert.Equal(t, "v0.157.0\n", stdout.String())
 }
@@ -119,8 +124,10 @@ func TestRunPlugin_MinOCBVersion(t *testing.T) {
 func TestRunPlugin_ActionError(t *testing.T) {
 	m := &mockPlugin{preBuildErr: errors.New("custom pre-build error")}
 	input := "action: pre-build\nconfig:\n  key: foo\n"
+	inputFile := filepath.Join(t.TempDir(), "input.yaml")
+	require.NoError(t, os.WriteFile(inputFile, []byte(input), 0600))
 	var stdout bytes.Buffer
-	err := runPlugin(m, strings.NewReader(input), &stdout)
+	err := runPlugin(m, inputFile, &stdout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "custom pre-build error")
 }
@@ -128,8 +135,10 @@ func TestRunPlugin_ActionError(t *testing.T) {
 func TestRunPlugin_UnknownAction(t *testing.T) {
 	m := &mockPlugin{}
 	input := "action: invalid-action\n"
+	inputFile := filepath.Join(t.TempDir(), "input.yaml")
+	require.NoError(t, os.WriteFile(inputFile, []byte(input), 0600))
 	var stdout bytes.Buffer
-	err := runPlugin(m, strings.NewReader(input), &stdout)
+	err := runPlugin(m, inputFile, &stdout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown plugin action \"invalid-action\"")
 }
@@ -137,8 +146,18 @@ func TestRunPlugin_UnknownAction(t *testing.T) {
 func TestRunPlugin_InvalidYAML(t *testing.T) {
 	m := &mockPlugin{}
 	input := ": invalid: yaml: ["
+	inputFile := filepath.Join(t.TempDir(), "input.yaml")
+	require.NoError(t, os.WriteFile(inputFile, []byte(input), 0600))
 	var stdout bytes.Buffer
-	err := runPlugin(m, strings.NewReader(input), &stdout)
+	err := runPlugin(m, inputFile, &stdout)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "error decoding plugin input")
+}
+
+func TestRunPlugin_MissingFile(t *testing.T) {
+	m := &mockPlugin{}
+	var stdout bytes.Buffer
+	err := runPlugin(m, filepath.Join(t.TempDir(), "nonexistent.yaml"), &stdout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "error reading plugin input")
 }

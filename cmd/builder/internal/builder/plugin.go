@@ -4,7 +4,6 @@
 package builder
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -243,8 +242,18 @@ func (ip *InstalledPlugin) run(action string, config map[string]any) error {
 		return err
 	}
 
-	cmd := exec.Command(ip.path)
-	cmd.Stdin = bytes.NewReader(inputBytes)
+	f, err := os.CreateTemp("", "ocb-plugin-input-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	defer os.Remove(f.Name())
+	_, err = f.Write(inputBytes)
+	if err == nil {
+		err = f.Sync()
+	}
+
+	cmd := exec.Command(ip.path, f.Name())
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

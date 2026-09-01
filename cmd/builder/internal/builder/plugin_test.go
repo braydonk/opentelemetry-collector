@@ -51,14 +51,15 @@ go 1.25.0
 
 import (
 	"fmt"
-	"io"
 	"os"
 )
 
 func main() {
-	input, _ := io.ReadAll(os.Stdin)
-	if string(input) != "" {
-		fmt.Printf("received:%s\n", string(input))
+	if len(os.Args) > 1 {
+		input, _ := os.ReadFile(os.Args[1])
+		if string(input) != "" {
+			fmt.Printf("received:%s\n", string(input))
+		}
 	}
 }
 `
