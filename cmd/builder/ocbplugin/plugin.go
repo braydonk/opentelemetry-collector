@@ -7,10 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/mod/semver"
 )
 
 // OCBPlugin defines the interface that plugins must implement.
@@ -31,14 +32,18 @@ type inputData struct {
 func RunPlugin(impl OCBPlugin) {
 	flag.Parse()
 	inputPath := flag.Arg(0)
-	if err := runPlugin(impl, inputPath, os.Stdout); err != nil {
+	if err := runPlugin(impl, inputPath); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 	os.Exit(0)
 }
 
-func runPlugin(impl OCBPlugin, inputPath string, stdout io.Writer) error {
+func runPlugin(impl OCBPlugin, inputPath string) error {
+	if err := checkSupportedVersion(impl); err != nil {
+		return err
+	}
+
 	inputBytes, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("error reading plugin input: %w", err)
@@ -48,9 +53,6 @@ func runPlugin(impl OCBPlugin, inputPath string, stdout io.Writer) error {
 		return fmt.Errorf("error decoding plugin input: %w", err)
 	}
 	switch input.Action {
-	case "min-ocb-version":
-		fmt.Fprintln(stdout, impl.MinOCBVersion())
-		return nil
 	case "pre-generate":
 		err = impl.PreGenerate(input.Config)
 	case "post-generate":
@@ -60,7 +62,7 @@ func runPlugin(impl OCBPlugin, inputPath string, stdout io.Writer) error {
 	case "post-build":
 		err = impl.PostBuild(input.Config)
 	default:
-		err = fmt.Errorf("unknown plugin action %q", input.Action)
+		err = fmt.Errorf("%w: '%q'", ErrUnknownAction, input.Action)
 	}
 	if err != nil {
 		return fmt.Errorf("error running '%s' plugin action: %w", input.Action, err)
@@ -68,7 +70,41 @@ func runPlugin(impl OCBPlugin, inputPath string, stdout io.Writer) error {
 	return nil
 }
 
+func checkSupportedVersion(impl OCBPlugin) error {
+	// The version of this package.
+	ocbVersion := moduleVersion
+	// The minimum version the plugin support.
+	pluginMinVersion := impl.MinOCBVersion()
+
+	// Normalize by ensuring a `v` prefix as required by semver.
+	ocbVersionNorm := ocbVersion
+	if ocbVersionNorm != "" && !strings.HasPrefix(ocbVersionNorm, "v") {
+		ocbVersionNorm = "v" + ocbVersionNorm
+	}
+	pluginMinVersionNorm := pluginMinVersion
+	if pluginMinVersionNorm != "" && !strings.HasPrefix(pluginMinVersionNorm, "v") {
+		pluginMinVersionNorm = "v" + pluginMinVersionNorm
+	}
+
+	compare := semver.Compare(ocbVersionNorm, pluginMinVersionNorm)
+	if compare < 0 {
+		return fmt.Errorf(
+			"%w: ocb version is %s but plugin requires at least %s",
+			ErrUnsupportedOCBVersion,
+			ocbVersion,
+			pluginMinVersion,
+		)
+	}
+	return nil
+}
+
 var (
+	// ErrUnsupportedOCBVersion is returned when the running ocb version is too old for the plugin.
+	ErrUnsupportedOCBVersion = errors.New("plugin does not support current ocb version")
+
+	// ErrUnknownAction is returned when an action is requested of the plugin that is unrecognized.
+	ErrUnknownAction = errors.New("unrecognized action")
+
 	// ErrUnsupportedActionPreGenerate is returned when a plugin does not support the PreGenerate lifecycle hook action.
 	ErrUnsupportedActionPreGenerate = errors.New("pre_generate action not supported")
 
