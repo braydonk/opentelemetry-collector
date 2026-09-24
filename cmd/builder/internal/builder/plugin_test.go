@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"go.opentelemetry.io/collector/cmd/builder/ocbplugin"
 )
 
 func TestPluginSourceConfigInstall_MissingSource(t *testing.T) {
@@ -92,7 +94,7 @@ func TestInstalledPlugin_UnsupportedVersion(t *testing.T) {
 	ip := &InstalledPlugin{path: p.InstallPath(pluginDir)}
 	err = ip.RunPreGenerate(map[string]any{"test": "val"})
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrUnsupportedOCBVersion)
+	assert.ErrorContains(t, err, ocbplugin.ErrUnsupportedOCBVersion.Error())
 }
 
 func TestParseRemoteGoMod(t *testing.T) {

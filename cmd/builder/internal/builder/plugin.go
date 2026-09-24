@@ -4,8 +4,10 @@
 package builder
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +16,7 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
-	"golang.org/x/mod/semver"
 )
-
-// ErrUnsupportedOCBVersion is returned when the running ocb version is too old for the plugin.
-var ErrUnsupportedOCBVersion = errors.New("plugin does not support current ocb version")
 
 var ocbVersion = DefaultBetaOtelColVersion
 
@@ -245,46 +243,13 @@ type InstalledPlugin struct {
 }
 
 type inputData struct {
-	Action string         `yaml:"action"`
-	Config map[string]any `yaml:"config"`
-}
-
-func (ip *InstalledPlugin) checkSupportedVersion() error {
-	cmd := exec.Command(ip.path, "--min-ocb-version")
-	out, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("error checking plugin minimum ocb version: %w", err)
-	}
-	pluginMinVersion := strings.TrimSpace(string(out))
-
-	// Normalize by ensuring a `v` prefix as required by semver.
-	ocbVersionNorm := ocbVersion
-	if ocbVersionNorm != "" && !strings.HasPrefix(ocbVersionNorm, "v") {
-		ocbVersionNorm = "v" + ocbVersionNorm
-	}
-	pluginMinVersionNorm := pluginMinVersion
-	if pluginMinVersionNorm != "" && !strings.HasPrefix(pluginMinVersionNorm, "v") {
-		pluginMinVersionNorm = "v" + pluginMinVersionNorm
-	}
-
-	compare := semver.Compare(ocbVersionNorm, pluginMinVersionNorm)
-	if compare < 0 {
-		return fmt.Errorf(
-			"%w: ocb version is %s but plugin requires at least %s",
-			ErrUnsupportedOCBVersion,
-			ocbVersion,
-			pluginMinVersion,
-		)
-	}
-	return nil
+	Action     string         `yaml:"action"`
+	OCBVersion string         `yaml:"ocb_version"`
+	Config     map[string]any `yaml:"config"`
 }
 
 func (ip *InstalledPlugin) run(action string, config map[string]any) error {
-	if err := ip.checkSupportedVersion(); err != nil {
-		return err
-	}
-
-	input := inputData{Action: action, Config: config}
+	input := inputData{Action: action, OCBVersion: ocbVersion, Config: config}
 	inputBytes, err := yaml.Marshal(&input)
 	if err != nil {
 		return err
@@ -301,12 +266,13 @@ func (ip *InstalledPlugin) run(action string, config map[string]any) error {
 		err = f.Sync()
 	}
 
+	var stderr bytes.Buffer
 	cmd := exec.Command(ip.path, f.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("error running hook: %w", err)
+		return fmt.Errorf("error running hook: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
