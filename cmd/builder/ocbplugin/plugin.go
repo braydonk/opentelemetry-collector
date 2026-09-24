@@ -7,11 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"strings"
 
 	"go.yaml.in/yaml/v3"
-	"golang.org/x/mod/semver"
 )
 
 // OCBPlugin defines the interface that plugins must implement.
@@ -30,20 +29,25 @@ type inputData struct {
 
 // RunPlugin runs an OCBPlugin implementation. This should be called from main.
 func RunPlugin(impl OCBPlugin) {
-	flag.Parse()
-	inputPath := flag.Arg(0)
-	if err := runPlugin(impl, inputPath); err != nil {
+	if err := runPlugin(impl, os.Args[1:], os.Stdout); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 	os.Exit(0)
 }
 
-func runPlugin(impl OCBPlugin, inputPath string) error {
-	if err := checkSupportedVersion(impl); err != nil {
+func runPlugin(impl OCBPlugin, args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("ocbplugin", flag.ContinueOnError)
+	minOCBVersion := fs.Bool("min-ocb-version", false, "Print the minimum supported OCB version and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *minOCBVersion {
+		_, err := fmt.Fprintln(stdout, impl.MinOCBVersion())
 		return err
 	}
 
+	inputPath := fs.Arg(0)
 	inputBytes, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("error reading plugin input: %w", err)
@@ -70,38 +74,7 @@ func runPlugin(impl OCBPlugin, inputPath string) error {
 	return nil
 }
 
-func checkSupportedVersion(impl OCBPlugin) error {
-	// The version of this package.
-	ocbVersion := moduleVersion
-	// The minimum version the plugin support.
-	pluginMinVersion := impl.MinOCBVersion()
-
-	// Normalize by ensuring a `v` prefix as required by semver.
-	ocbVersionNorm := ocbVersion
-	if ocbVersionNorm != "" && !strings.HasPrefix(ocbVersionNorm, "v") {
-		ocbVersionNorm = "v" + ocbVersionNorm
-	}
-	pluginMinVersionNorm := pluginMinVersion
-	if pluginMinVersionNorm != "" && !strings.HasPrefix(pluginMinVersionNorm, "v") {
-		pluginMinVersionNorm = "v" + pluginMinVersionNorm
-	}
-
-	compare := semver.Compare(ocbVersionNorm, pluginMinVersionNorm)
-	if compare < 0 {
-		return fmt.Errorf(
-			"%w: ocb version is %s but plugin requires at least %s",
-			ErrUnsupportedOCBVersion,
-			ocbVersion,
-			pluginMinVersion,
-		)
-	}
-	return nil
-}
-
 var (
-	// ErrUnsupportedOCBVersion is returned when the running ocb version is too old for the plugin.
-	ErrUnsupportedOCBVersion = errors.New("plugin does not support current ocb version")
-
 	// ErrUnknownAction is returned when an action is requested of the plugin that is unrecognized.
 	ErrUnknownAction = errors.New("unrecognized action")
 

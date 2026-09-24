@@ -40,31 +40,6 @@ func TestPluginSourceConfigInstall_NonExistentPluginDir(t *testing.T) {
 }
 
 func TestPluginSourceConfigInstall_FromPath(t *testing.T) {
-	pluginSourceDir := t.TempDir()
-	goModContent := `module example.com/dummyplugin
-
-go 1.25.0
-`
-	require.NoError(t, os.WriteFile(filepath.Join(pluginSourceDir, "go.mod"), []byte(goModContent), 0600))
-
-	mainGoContent := `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-func main() {
-	if len(os.Args) > 1 {
-		input, _ := os.ReadFile(os.Args[1])
-		if string(input) != "" {
-			fmt.Printf("received:%s\n", string(input))
-		}
-	}
-}
-`
-	require.NoError(t, os.WriteFile(filepath.Join(pluginSourceDir, "main.go"), []byte(mainGoContent), 0600))
-
 	outputDir := t.TempDir()
 	pluginDir := filepath.Join(outputDir, "hooks")
 	require.NoError(t, os.MkdirAll(pluginDir, 0750))
@@ -76,7 +51,7 @@ func main() {
 	cfg.Distribution.Go = "go"
 
 	p := PluginSourceConfig{
-		Plugin: pluginSourceDir,
+		Plugin: "./testdata/dummyplugin",
 	}
 
 	err = p.Install(cfg, pluginDir)
@@ -87,10 +62,37 @@ func main() {
 	require.NoError(t, err)
 	assert.False(t, info.IsDir())
 
-	// Test running the installed plugin via stdin
 	ip := &InstalledPlugin{path: expectedBinaryPath}
 	err = ip.RunPreGenerate(map[string]any{"test": "val"})
 	require.NoError(t, err)
+}
+
+func TestInstalledPlugin_UnsupportedVersion(t *testing.T) {
+	outputDir := t.TempDir()
+	pluginDir := filepath.Join(outputDir, "hooks")
+	require.NoError(t, os.MkdirAll(pluginDir, 0750))
+
+	cfg, err := NewDefaultConfig()
+	require.NoError(t, err)
+	cfg.Logger = zap.NewNop()
+	cfg.Distribution.OutputPath = outputDir
+	cfg.Distribution.Go = "go"
+
+	p := PluginSourceConfig{
+		Plugin: "./testdata/dummyplugin",
+	}
+
+	err = p.Install(cfg, pluginDir)
+	require.NoError(t, err)
+
+	origVersion := ocbVersion
+	t.Cleanup(func() { ocbVersion = origVersion })
+	ocbVersion = "v0.150.0"
+
+	ip := &InstalledPlugin{path: p.InstallPath(pluginDir)}
+	err = ip.RunPreGenerate(map[string]any{"test": "val"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrUnsupportedOCBVersion)
 }
 
 func TestParseRemoteGoMod(t *testing.T) {

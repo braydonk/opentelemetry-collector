@@ -10,10 +10,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+	"golang.org/x/mod/semver"
 )
+
+// ErrUnsupportedOCBVersion is returned when the running ocb version is too old for the plugin.
+var ErrUnsupportedOCBVersion = errors.New("plugin does not support current ocb version")
+
+var ocbVersion = DefaultBetaOtelColVersion
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	if ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		ocbVersion = info.Main.Version
+	}
+}
 
 const (
 	ocbPluginDirEnv     = "OCB_PLUGIN_DIR"
@@ -235,7 +249,41 @@ type inputData struct {
 	Config map[string]any `yaml:"config"`
 }
 
+func (ip *InstalledPlugin) checkSupportedVersion() error {
+	cmd := exec.Command(ip.path, "--min-ocb-version")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("error checking plugin minimum ocb version: %w", err)
+	}
+	pluginMinVersion := strings.TrimSpace(string(out))
+
+	// Normalize by ensuring a `v` prefix as required by semver.
+	ocbVersionNorm := ocbVersion
+	if ocbVersionNorm != "" && !strings.HasPrefix(ocbVersionNorm, "v") {
+		ocbVersionNorm = "v" + ocbVersionNorm
+	}
+	pluginMinVersionNorm := pluginMinVersion
+	if pluginMinVersionNorm != "" && !strings.HasPrefix(pluginMinVersionNorm, "v") {
+		pluginMinVersionNorm = "v" + pluginMinVersionNorm
+	}
+
+	compare := semver.Compare(ocbVersionNorm, pluginMinVersionNorm)
+	if compare < 0 {
+		return fmt.Errorf(
+			"%w: ocb version is %s but plugin requires at least %s",
+			ErrUnsupportedOCBVersion,
+			ocbVersion,
+			pluginMinVersion,
+		)
+	}
+	return nil
+}
+
 func (ip *InstalledPlugin) run(action string, config map[string]any) error {
+	if err := ip.checkSupportedVersion(); err != nil {
+		return err
+	}
+
 	input := inputData{Action: action, Config: config}
 	inputBytes, err := yaml.Marshal(&input)
 	if err != nil {
