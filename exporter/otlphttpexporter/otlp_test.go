@@ -1181,7 +1181,17 @@ func TestEncoding(t *testing.T) {
 
 func createBackend(endpoint string, handler func(writer http.ResponseWriter, request *http.Request)) *httptest.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc(endpoint, handler)
+	mux.HandleFunc(endpoint, func(writer http.ResponseWriter, request *http.Request) {
+		// Drain the request body before closing the connection. With a zero-valued
+		// confighttp.ClientConfig (DisableKeepAlives: true, "Connection: close"),
+		// net/http's Server skips draining unread request bodies on close; closing
+		// the socket with unread bytes (e.g. pprofile's dictionary sentinel) sends
+		// a TCP RST that can abort the unread HTTP response on Windows.
+		defer func() {
+			_, _ = io.Copy(io.Discard, request.Body)
+		}()
+		handler(writer, request)
+	})
 
 	srv := httptest.NewServer(mux)
 
